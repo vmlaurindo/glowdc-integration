@@ -47,4 +47,17 @@ describe("normalizeUazapiInbound", () => {
     expect(organic.classification).toBe("organic");
     expect(incomplete.classification).toBe("paid_incomplete");
   });
+
+  it("removes the WhatsApp device suffix without changing the subscriber", () => {
+    const result = normalizeUazapiInbound({
+      message: { key: { remoteJid: "5511999990000:17@s.whatsapp.net" } }
+    });
+    expect(result.phone).toBe("5511999990000");
+  });
+
+  it("accepts Unix timestamps in seconds or milliseconds", () => {
+    const seconds = normalizeUazapiInbound({ message: { timestamp: "1790683200" } });
+    const milliseconds = normalizeUazapiInbound({ message: { timestamp: "1790683200000" } });
+    expect(seconds.occurredAt).toBe(milliseconds.occurredAt);
+  });
 });

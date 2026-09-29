@@ -15,13 +15,24 @@ export async function deliverMetaConversion(
   if (!/^v\d+\.\d+$/.test(env.META_GRAPH_VERSION)) {
     throw new Error("meta_graph_version_not_pinned");
   }
+  const conversion = await conversionRecord(env, conversionId);
+  if (!conversion || conversion.status === "sent") return;
   const contexts = await supabaseJson<ConversionContext[]>(env, "/rest/v1/rpc/get_meta_delivery_context", {
     method: "POST",
     body: JSON.stringify({ p_conversion_id: conversionId })
   });
   const context = contexts[0];
-  if (!context || context.status === "sent") return;
-  const workspaceId = await conversionWorkspace(env, conversionId);
+  if (!context) {
+    await patchRows(env, "conversion_events", `id=eq.${encodeURIComponent(conversionId)}`, {
+      status: "failed_terminal", last_error_code: "meta_destination_unavailable"
+    });
+    await recordMetaAudit(env, {
+      conversionId, eventId: conversion.event_id, attempt, httpStatus: null,
+      outcome: "terminal", responseHash: null, errorCode: "meta_destination_unavailable"
+    });
+    return;
+  }
+  const workspaceId = conversion.workspace_id;
   const phone = await decryptText(
     context.phone_cipher,
     env.CREDENTIAL_ENCRYPTION_KEY,
@@ -46,14 +57,23 @@ export async function deliverMetaConversion(
     sourceId: context.source_id,
     testEventCode: context.test_event_code
   });
-  const response = await fetch(
-    `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(context.dataset_id)}/events`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    }
-  );
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(context.dataset_id)}/events`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }
+    );
+  } catch {
+    await recordMetaAudit(env, {
+      conversionId, eventId: context.event_id, attempt, httpStatus: null,
+      outcome: "retry", responseHash: null, errorCode: "meta_network_error"
+    });
+    throw new RetryableDeliveryError("meta_network_error");
+  }
   const responseText = (await response.text()).slice(0, 20_000);
   const responseHash = await sha256Hex(responseText);
   const retryable = isRetryableMetaStatus(response.status);
@@ -83,12 +103,15 @@ export async function deliverMetaConversion(
   });
 }
 
-async function conversionWorkspace(env: Env, conversionId: string): Promise<string> {
-  const rows = await supabaseJson<Array<{ workspace_id: string }>>(
+async function conversionRecord(env: Env, conversionId: string): Promise<{
+  workspace_id: string;
+  event_id: string;
+  status: string;
+} | null> {
+  const rows = await supabaseJson<Array<{ workspace_id: string; event_id: string; status: string }>>(
     env,
-    `/rest/v1/conversion_events?id=eq.${encodeURIComponent(conversionId)}&select=workspace_id&limit=1`
+    `/rest/v1/conversion_events?id=eq.${encodeURIComponent(conversionId)}` +
+      "&select=workspace_id,event_id,status&limit=1"
   );
-  if (!rows[0]) throw new Error("conversion_not_found");
-  return rows[0].workspace_id;
+  return rows[0] ?? null;
 }
-

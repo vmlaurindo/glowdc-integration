@@ -77,7 +77,7 @@ CREATE TABLE public.webhook_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
   connection_id uuid NOT NULL REFERENCES public.provider_connections(id) ON DELETE CASCADE,
-  lead_id uuid NOT NULL REFERENCES public.leads(id) ON DELETE CASCADE,
+  lead_id uuid REFERENCES public.leads(id) ON DELETE CASCADE,
   external_message_id text NOT NULL,
   classification public.inbound_classification NOT NULL,
   occurred_at timestamptz NOT NULL,
@@ -212,6 +212,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
+  v_webhook_event_id uuid;
   v_contact_id uuid;
   v_lead_id uuid;
   v_attribution_id uuid;
@@ -223,6 +224,21 @@ BEGIN
     WHERE id = p_connection_id AND workspace_id = p_workspace_id AND status <> 'suspended'
   ) THEN
     RAISE EXCEPTION 'connection_scope_invalid';
+  END IF;
+
+  INSERT INTO public.webhook_events(
+    workspace_id, connection_id, external_message_id, classification, occurred_at
+  ) VALUES (
+    p_workspace_id, p_connection_id, p_external_message_id, p_classification, p_occurred_at
+  )
+  ON CONFLICT (connection_id, external_message_id) DO NOTHING
+  RETURNING id INTO v_webhook_event_id;
+  v_event_inserted := FOUND;
+
+  IF NOT v_event_inserted THEN
+    SELECT id INTO v_conversion_id FROM public.conversion_events WHERE event_id = p_event_id;
+    RETURN QUERY SELECT v_conversion_id, 'duplicate'::text;
+    RETURN;
   END IF;
 
   INSERT INTO public.contacts(
@@ -247,18 +263,7 @@ BEGIN
     status = CASE WHEN public.leads.status = 'archived' THEN 'archived' ELSE 'active' END
   RETURNING id INTO v_lead_id;
 
-  INSERT INTO public.webhook_events(
-    workspace_id, connection_id, lead_id, external_message_id, classification, occurred_at
-  ) VALUES (
-    p_workspace_id, p_connection_id, v_lead_id, p_external_message_id, p_classification, p_occurred_at
-  ) ON CONFLICT (connection_id, external_message_id) DO NOTHING;
-  v_event_inserted := FOUND;
-
-  IF NOT v_event_inserted THEN
-    SELECT id INTO v_conversion_id FROM public.conversion_events WHERE event_id = p_event_id;
-    RETURN QUERY SELECT v_conversion_id, 'duplicate'::text;
-    RETURN;
-  END IF;
+  UPDATE public.webhook_events SET lead_id = v_lead_id WHERE id = v_webhook_event_id;
 
   IF p_ctwa_hmac IS NOT NULL OR p_source_id IS NOT NULL THEN
     INSERT INTO public.attributions(
@@ -270,14 +275,29 @@ BEGIN
       p_ctwa_hmac, p_ctwa_cipher, p_source_id, p_source_url, p_headline,
       p_occurred_at, p_occurred_at
     )
-    ON CONFLICT (workspace_id, connection_id, external_message_id) DO UPDATE SET
-      ctwa_clid_hmac = COALESCE(EXCLUDED.ctwa_clid_hmac, public.attributions.ctwa_clid_hmac),
-      ctwa_clid_cipher = COALESCE(EXCLUDED.ctwa_clid_cipher, public.attributions.ctwa_clid_cipher),
-      source_id = COALESCE(EXCLUDED.source_id, public.attributions.source_id),
-      source_url = COALESCE(EXCLUDED.source_url, public.attributions.source_url),
-      headline = COALESCE(EXCLUDED.headline, public.attributions.headline),
-      last_seen_at = GREATEST(public.attributions.last_seen_at, EXCLUDED.last_seen_at)
+    ON CONFLICT DO NOTHING
     RETURNING id INTO v_attribution_id;
+
+    IF v_attribution_id IS NULL THEN
+      SELECT id INTO v_attribution_id
+      FROM public.attributions
+      WHERE workspace_id = p_workspace_id
+        AND (
+          (p_ctwa_hmac IS NOT NULL AND ctwa_clid_hmac = p_ctwa_hmac)
+          OR (connection_id = p_connection_id AND external_message_id = p_external_message_id)
+        )
+      ORDER BY created_at
+      LIMIT 1;
+
+      UPDATE public.attributions SET
+        ctwa_clid_hmac = COALESCE(p_ctwa_hmac, ctwa_clid_hmac),
+        ctwa_clid_cipher = COALESCE(p_ctwa_cipher, ctwa_clid_cipher),
+        source_id = COALESCE(p_source_id, source_id),
+        source_url = COALESCE(p_source_url, source_url),
+        headline = COALESCE(p_headline, headline),
+        last_seen_at = GREATEST(last_seen_at, p_occurred_at)
+      WHERE id = v_attribution_id;
+    END IF;
   END IF;
 
   IF p_create_conversion THEN
@@ -338,4 +358,3 @@ GRANT EXECUTE ON FUNCTION public.ingest_whatsapp_event(
   text, text, text, text, text, text, text, text, boolean, public.conversion_status
 ) TO service_role;
 GRANT EXECUTE ON FUNCTION public.get_meta_delivery_context(uuid) TO service_role;
-

@@ -63,7 +63,13 @@ app.post("/api/connections", async (context) => {
   const parsed = createConnectionSchema.safeParse(await context.req.json().catch(() => null));
   if (!parsed.success) return context.json({ error: "invalid_connection", fields: parsed.error.flatten().fieldErrors }, 400);
   await requireWorkspaceMember(context.env, parsed.data.workspaceId, context.get("userId"), ["owner", "admin", "operator"]);
-  const baseUrl = assertAllowedProviderUrl(parsed.data.baseUrl, context.env.UAZAPI_ALLOWED_HOSTS).toString().replace(/\/$/, "");
+  let baseUrl: string;
+  try {
+    baseUrl = assertAllowedProviderUrl(parsed.data.baseUrl, context.env.UAZAPI_ALLOWED_HOSTS)
+      .toString().replace(/\/$/, "");
+  } catch (error) {
+    return context.json({ error: errorCode(error) }, 400);
+  }
   const id = crypto.randomUUID();
   const credentialsCipher = await encryptText(
     JSON.stringify({ token: parsed.data.token }),
@@ -331,15 +337,14 @@ export default {
     for (const message of batch.messages) {
       try {
         if (message.body.kind === "ingest") await processDelivery(env, message.body.deliveryId);
-        else await deliverMetaConversion(env, message.body.conversionId, message.body.attempt ?? message.attempts);
+        else await deliverMetaConversion(env, message.body.conversionId, message.attempts);
         message.ack();
       } catch (error) {
-        if (error instanceof RetryableDeliveryError || message.body.kind === "ingest") {
-          message.retry({ delaySeconds: Math.min(300, 2 ** message.attempts * 5) });
-        } else {
-          console.error(JSON.stringify({ code: errorCode(error), queue: batch.queue }));
-          message.ack();
-        }
+        console.error(JSON.stringify({
+          code: errorCode(error), queue: batch.queue,
+          retryable: error instanceof RetryableDeliveryError || message.body.kind === "ingest"
+        }));
+        message.retry({ delaySeconds: Math.min(300, 2 ** message.attempts * 5) });
       }
     }
   },

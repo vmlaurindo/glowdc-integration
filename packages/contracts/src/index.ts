@@ -94,7 +94,8 @@ function firstBoolean(...values: unknown[]): boolean {
 function normalizePhone(value: string | null): string | null {
   if (!value) return null;
   const local = value.split("@")[0] ?? "";
-  const digits = local.replace(/\D/g, "");
+  const subscriber = local.split(":")[0] ?? "";
+  const digits = subscriber.replace(/\D/g, "");
   return digits.length >= 8 && digits.length <= 15 ? digits : null;
 }
 
@@ -149,7 +150,10 @@ export function normalizeUazapiInbound(input: unknown, now = new Date()): Normal
   const sourceUrl = firstString(referral.source_url, referral.sourceUrl);
   const headline = firstString(referral.headline, referral.title);
   const timestamp = firstString(message.timestamp, root.timestamp, data.timestamp);
-  const parsedTime = timestamp ? new Date(/^\d+$/.test(timestamp) ? Number(timestamp) * 1000 : timestamp) : now;
+  const numericTimestamp = timestamp && /^\d+$/.test(timestamp) ? Number(timestamp) : null;
+  const parsedTime = timestamp
+    ? new Date(numericTimestamp === null ? timestamp : numericTimestamp > 1_000_000_000_000 ? numericTimestamp : numericTimestamp * 1000)
+    : now;
   const occurredAt = Number.isNaN(parsedTime.getTime()) ? now.toISOString() : parsedTime.toISOString();
 
   let classification: InboundClassification;
