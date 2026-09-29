@@ -1,0 +1,2 @@
+-- Intencionalmente vazio. Crie usuários internos por convite no Supabase Auth;
+-- o primeiro workspace é criado pelo fluxo autenticado da aplicação.
