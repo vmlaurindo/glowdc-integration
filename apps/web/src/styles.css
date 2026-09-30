@@ -176,6 +176,8 @@ input:focus, select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px va
 .health-chip > span { width: 7px; height: 7px; border-radius: 50%; }
 .health-chip.healthy > span { background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); }
 .health-chip.attention > span { background: var(--warning); box-shadow: 0 0 0 4px var(--warning-soft); }
+.demo-chip { min-height: 34px; padding: 0 .7rem; display: inline-flex; align-items: center; gap: .5rem; border: 1px solid color-mix(in srgb, var(--brand) 34%, var(--line)); border-radius: 99px; color: var(--brand); background: var(--brand-soft); font: 500 .62rem "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.demo-chip > span { width: 7px; height: 7px; border-radius: 2px; background: var(--brand); transform: rotate(45deg); }
 .workspace-select { width: 180px; position: relative; display: block; }
 .workspace-select select { min-height: 40px; padding: .55rem 2.25rem .55rem .75rem; appearance: none; font-size: .78rem; }
 .workspace-select .icon { width: 15px; position: absolute; right: .7rem; top: 50%; pointer-events: none; transform: translateY(-50%); }
@@ -255,6 +257,53 @@ input:focus, select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px va
 .notice.success { color: var(--success); background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 35%, var(--line)); }
 .notice button { min-width: 32px; min-height: 32px; border: 0; color: inherit; background: transparent; font-size: 1.15rem; }
 
+/* Administration */
+.admin-page { --admin-rail: 176px; min-width: 0; overflow-x: hidden; }
+.admin-title { margin-bottom: 1.25rem; }
+.admin-tabs { margin-bottom: 1.25rem; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 9px; background: var(--surface); overflow: hidden; }
+.admin-tabs button { min-height: 58px; padding: .75rem 1rem; display: flex; align-items: center; gap: .75rem; color: var(--muted); border: 0; border-right: 1px solid var(--line); background: transparent; text-align: left; font-size: .8rem; font-weight: 600; position: relative; }
+.admin-tabs button:last-child { border-right: 0; }
+.admin-tabs button span { color: var(--muted); font: 500 .61rem "IBM Plex Mono", monospace; }
+.admin-tabs button:hover { color: var(--text); background: var(--bg-subtle); }
+.admin-tabs button.active { color: var(--text); background: var(--brand-soft); }
+.admin-tabs button.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, var(--brand), var(--brand-strong)); }
+.admin-tabs button.active span { color: var(--brand); }
+.admin-surface { min-width: 0; max-width: 100%; min-height: 420px; padding: clamp(1.2rem, 2.5vw, 2rem); overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
+.admin-surface-heading { margin-bottom: 1.5rem; display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem; }
+.admin-surface-heading h2 { margin: 0 0 .4rem; font-size: 1.25rem; }
+.admin-surface-heading p:last-child { max-width: 620px; margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.55; }
+.admin-editor { margin-bottom: 1.25rem; padding: 1rem; display: grid; grid-template-columns: minmax(170px, .7fr) minmax(220px, 1fr) minmax(220px, 1fr) auto; align-items: end; gap: 1rem; border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--line)); border-radius: 9px; background: var(--bg-subtle); }
+.admin-editor h3 { margin: 0; font-size: 1rem; }
+.admin-editor .field { margin: 0; }
+.admin-editor .field small { color: var(--muted); font-size: .65rem; }
+.admin-editor-actions { min-height: 46px; display: flex; align-items: center; gap: .5rem; }
+.button.compact { min-height: 36px; padding: .45rem .75rem; font-size: .72rem; }
+.admin-table { width: 100%; max-width: 100%; }
+.admin-table code { color: var(--brand); font: 500 .7rem "IBM Plex Mono", monospace; }
+.admin-table td { vertical-align: middle; }
+.table-action { text-align: right; }
+.table-actions { display: flex; justify-content: flex-end; align-items: center; gap: .75rem; white-space: nowrap; }
+.role-select { width: 132px; min-height: 38px; padding: .45rem .65rem; font-size: .75rem; }
+.member-state { width: fit-content; min-height: 27px; display: inline-flex; align-items: center; gap: .42rem; color: var(--text-soft); font: 500 .63rem "IBM Plex Mono", monospace; white-space: nowrap; }
+.member-state i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.member-state.active i { background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); }
+.member-state.pending i { background: var(--warning); box-shadow: 0 0 0 4px var(--warning-soft); }
+.text-action { min-height: 36px; padding: .35rem .2rem; color: var(--brand); border: 0; background: transparent; font-size: .72rem; font-weight: 600; }
+.text-action:hover { text-decoration: underline; }
+.text-action.danger { color: var(--danger); }
+.audit-list { list-style: none; margin: 0; padding: .25rem 0; position: relative; }
+.audit-list::before { content: ""; position: absolute; top: 16px; bottom: 22px; left: calc(var(--admin-rail) + 9px); width: 1px; background: var(--line); }
+.audit-list li { padding-bottom: .9rem; display: grid; grid-template-columns: var(--admin-rail) 19px minmax(0, 1fr); gap: .8rem; align-items: start; }
+.audit-list time { padding-top: .9rem; color: var(--muted); font: 500 .64rem "IBM Plex Mono", monospace; text-align: right; }
+.audit-mark { width: 9px; height: 9px; margin-top: 1.05rem; justify-self: center; border: 2px solid var(--surface); border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 1px var(--brand); z-index: 1; }
+.audit-card { padding: .85rem 1rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-subtle); }
+.audit-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.audit-card-heading strong { font-size: .82rem; }
+.audit-card-heading span { color: var(--muted); font: 500 .58rem "IBM Plex Mono", monospace; text-transform: uppercase; }
+.audit-card p { margin: .45rem 0 .7rem; color: var(--text-soft); font-size: .78rem; }
+.audit-card footer { padding-top: .65rem; display: flex; justify-content: space-between; gap: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .67rem; }
+.audit-card code { color: var(--muted); font-family: "IBM Plex Mono", monospace; }
+
 /* Data views */
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
 table { width: 100%; border-collapse: collapse; }
@@ -298,12 +347,15 @@ td small { color: var(--muted); font: 500 .65rem "IBM Plex Mono", monospace; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .page-title { grid-template-columns: 1fr; gap: .75rem; }
   .onboarding-grid { grid-template-columns: 1fr; }
+  .admin-editor { grid-template-columns: 1fr 1fr; }
+  .admin-editor-actions { justify-content: flex-end; }
   .steps { position: static; display: flex; overflow-x: auto; gap: 1rem; padding-bottom: .8rem; }
   .step { min-width: 160px; }
   .step::after { display: none; }
 }
 
 @media (max-width: 760px) {
+  html, body { overflow-x: clip; }
   .login-shell { padding: 1rem; }
   .login-frame { min-height: auto; grid-template-columns: 1fr; }
   .login-context { min-height: 380px; padding: 2rem; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -315,17 +367,19 @@ td small { color: var(--muted); font: 500 .65rem "IBM Plex Mono", monospace; }
   .app-shell { display: block; padding-bottom: 70px; }
   .sidebar { position: fixed; z-index: 20; top: auto; bottom: 0; width: 100%; height: 70px; padding: .45rem .6rem; border-top: 1px solid #25272c; border-right: 0; }
   .sidebar > .brand, .sidebar-actions, .nav-group > p { display: none; }
-  .sidebar nav { height: 100%; margin: 0; display: grid; grid-template-columns: 3fr 1fr; gap: 0; }
+  .sidebar nav { height: 100%; margin: 0; display: grid; grid-template-columns: repeat(5, minmax(62px, 1fr)); gap: 0; overflow-x: auto; }
   .nav-group { display: contents; }
-  .nav-group:first-child > button:nth-of-type(1) { grid-column: 1; grid-row: 1; transform: translateX(-33.333%); }
-  .nav-group:first-child > button:nth-of-type(2) { grid-column: 1; grid-row: 1; }
-  .nav-group:first-child > button:nth-of-type(3) { grid-column: 1; grid-row: 1; transform: translateX(33.333%); }
-  .nav-group:last-child > button { grid-column: 2; grid-row: 1; }
-  .nav-group > button { min-width: 25%; min-height: 58px; display: grid; place-items: center; align-content: center; gap: .25rem; border-radius: 6px; font-size: .57rem; }
+  .nav-group:first-child > button:nth-of-type(1) { grid-column: 1; grid-row: 1; transform: none; }
+  .nav-group:first-child > button:nth-of-type(2) { grid-column: 2; grid-row: 1; transform: none; }
+  .nav-group:first-child > button:nth-of-type(3) { grid-column: 3; grid-row: 1; transform: none; }
+  .nav-group:nth-child(2) > button { grid-column: 4; grid-row: 1; }
+  .nav-group:nth-child(3) > button { grid-column: 5; grid-row: 1; }
+  .nav-group > button { min-width: 62px; min-height: 58px; display: grid; place-items: center; align-content: center; gap: .25rem; border-radius: 6px; font-size: .57rem; }
   .nav-group > button span { display: block; }
   .nav-group > button.active::before { left: 20%; right: 20%; top: -1px; bottom: auto; width: auto; height: 2px; }
   .topbar { min-height: 70px; padding: .7rem 1rem; }
   .workspace-identity, .health-chip { display: none; }
+  .demo-chip { max-width: 40px; padding-inline: .7rem; font-size: 0; }
   .mobile-brand, .mobile-theme { display: block; }
   .mobile-brand .brand-type small { display: none; }
   .mobile-brand .brand-type strong { font-size: 1rem; }
@@ -341,6 +395,31 @@ td small { color: var(--muted); font: 500 .65rem "IBM Plex Mono", monospace; }
   .event-rail li { grid-template-columns: 22px 1fr; }
   .event-time { grid-column: 2; padding-top: 0; }
   .event-card { grid-column: 2; }
+  .admin-tabs button { min-height: 54px; justify-content: center; }
+  .admin-tabs button span { display: none; }
+  .admin-surface { padding: 1rem; }
+  .admin-surface-heading { align-items: stretch; flex-direction: column; gap: 1rem; }
+  .admin-surface-heading .button { width: 100%; }
+  .admin-editor { grid-template-columns: 1fr; }
+  .admin-editor-actions { justify-content: stretch; }
+  .admin-editor-actions .button { flex: 1; }
+  .admin-table { overflow: visible; border: 0; background: transparent; box-shadow: none; }
+  .admin-table table, .admin-table tbody { width: 100%; display: block; }
+  .admin-table thead { display: none; }
+  .admin-table tbody { display: grid; gap: .8rem; }
+  .admin-table tr { width: 100%; display: block; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-subtle); }
+  .admin-table td, .admin-table td:first-child { min-width: 0; padding: .72rem .8rem; display: flex; align-items: center; justify-content: flex-end; gap: .55rem; border-top: 1px solid var(--line); overflow-wrap: anywhere; text-align: right; }
+  .admin-table td:first-child { border-top: 0; }
+  .admin-table td::before { content: attr(data-label); margin-right: auto; flex: 0 0 82px; color: var(--muted); font: 500 .57rem "IBM Plex Mono", monospace; letter-spacing: .06em; text-align: left; text-transform: uppercase; }
+  .admin-table td small { font-size: .58rem; }
+  .admin-table .table-action, .admin-table .table-actions { justify-content: flex-end; }
+  .admin-table .role-select { width: 132px; }
+  .audit-list::before { left: 8px; }
+  .audit-list li { grid-template-columns: 18px minmax(0, 1fr); gap: .65rem; }
+  .audit-list time { grid-column: 2; padding: 0; text-align: left; }
+  .audit-mark { grid-column: 1; grid-row: 1 / span 2; margin-top: .25rem; }
+  .audit-card { grid-column: 2; }
+  .audit-card footer { align-items: flex-start; flex-direction: column; gap: .35rem; }
 }
 
 @media (max-width: 440px) {

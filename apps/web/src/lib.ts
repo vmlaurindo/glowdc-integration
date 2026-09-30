@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { isLocalMockMode, localMockApi } from "./mock-api";
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -9,6 +10,7 @@ export const supabase = createClient(
 const apiUrl = import.meta.env.VITE_API_URL.replace(/\/$/, "");
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (isLocalMockMode()) return localMockApi<T>(path, init);
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new Error("session_expired");
@@ -33,6 +35,12 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 export function friendlyError(error: unknown): string {
   const code = error instanceof Error ? error.message : "unknown_error";
   const messages: Record<string, string> = {
+    workspace_slug_conflict: "Este identificador já está em uso.",
+    invalid_workspace: "Revise o nome e o identificador do workspace.",
+    invalid_member: "Revise o e-mail e o papel do integrante.",
+    member_already_exists: "Esta pessoa já participa do workspace.",
+    last_owner_required: "O workspace precisa manter pelo menos um owner.",
+    invite_not_pending: "Este convite não está pendente.",
     invalid_login_credentials: "E-mail ou senha não conferem.",
     session_expired: "Sua sessão expirou. Entre novamente.",
     automatic_webhook_failed: "A instalação automática falhou. Use as instruções manuais exibidas.",
