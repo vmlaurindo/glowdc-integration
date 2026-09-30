@@ -3,12 +3,28 @@ main = "src/index.ts"
 compatibility_date = "2026-09-29"
 workers_dev = true
 
+[[routes]]
+pattern = "app.maxio.com.br/glowdc"
+zone_name = "maxio.com.br"
+
+[[routes]]
+pattern = "app.maxio.com.br/glowdc/*"
+zone_name = "maxio.com.br"
+
+[assets]
+binding = "ASSETS"
+directory = "../../apps/web/dist"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
 [vars]
 APP_ENV = "development"
+APP_BASE_PATH = "/glowdc"
+PUBLIC_API_BASE_URL = "https://app.maxio.com.br/glowdc"
 META_SENDS_ENABLED = "false"
 META_GRAPH_VERSION = "SET_EXPLICITLY_BEFORE_DEPLOY"
 UAZAPI_ALLOWED_HOSTS = ".uazapi.com"
-WEB_APP_ORIGIN = "http://localhost:5173"
+WEB_APP_ORIGIN = "https://app.maxio.com.br"
 RAW_RETENTION_DAYS = "7"
 AUDIT_RETENTION_DAYS = "60"
 

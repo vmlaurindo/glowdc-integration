@@ -17,7 +17,6 @@ port = 54323
 
 [auth]
 enabled = true
-site_url = "http://localhost:5173"
-additional_redirect_urls = ["http://localhost:5173"]
+site_url = "https://app.maxio.com.br/glowdc/login"
+additional_redirect_urls = ["http://localhost:5173/glowdc/login", "https://app.maxio.com.br/glowdc/login"]
 enable_signup = false
-

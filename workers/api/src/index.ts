@@ -332,7 +332,14 @@ function errorCode(error: unknown): string {
 }
 
 export default {
-  fetch: app.fetch,
+  async fetch(request: Request, env: Env, executionContext: ExecutionContext): Promise<Response> {
+    const routedRequest = requestWithoutBasePath(request, env.APP_BASE_PATH);
+    const pathname = new URL(routedRequest.url).pathname;
+    const isBackendRequest = pathname === "/health" || pathname === "/api" ||
+      pathname.startsWith("/api/") || pathname.startsWith("/webhooks/");
+    if (isBackendRequest) return app.fetch(routedRequest, env, executionContext);
+    return env.ASSETS.fetch(routedRequest);
+  },
   async queue(batch: MessageBatch<QueuePayload>, env: Env): Promise<void> {
     for (const message of batch.messages) {
       try {
@@ -357,3 +364,11 @@ export default {
     ]);
   }
 };
+
+export function requestWithoutBasePath(request: Request, configuredBasePath: string): Request {
+  const basePath = `/${configuredBasePath.trim().replace(/^\/+|\/+$/g, "")}`;
+  const url = new URL(request.url);
+  if (url.pathname === basePath) url.pathname = "/";
+  else if (url.pathname.startsWith(`${basePath}/`)) url.pathname = url.pathname.slice(basePath.length);
+  return new Request(url.toString(), request);
+}

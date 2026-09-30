@@ -6,7 +6,7 @@ Esta base não cria nem cobra recursos automaticamente. Antes do primeiro
 deploy, confirme nominalmente:
 
 1. projeto Supabase dedicado e plano contratado;
-2. conta Cloudflare, banco D1, duas filas, duas DLQs e projeto Pages;
+2. conta Cloudflare, banco D1, duas filas, duas DLQs e rota do Worker;
 3. instância UAZAPI de teste e hostname incluído na allowlist;
 4. dataset/page da Meta e versão Graph suportada;
 5. ambiente de teste, nunca produção, para o primeiro percurso.
@@ -30,11 +30,12 @@ subdomínios de `.uazapi.com`. Não permita curingas genéricos.
 ## Recursos Cloudflare
 
 Substitua o ID D1 em `workers/api/wrangler.toml`, crie as filas descritas no
-arquivo e aplique a migração. O Pages usa `apps/web` como diretório, comando
-`npm run build` e saída `dist`.
+arquivo e aplique a migração. Gere primeiro `apps/web/dist`; o binding
+`ASSETS` publica esse bundle pelo mesmo Worker.
 
-O endpoint público do Worker deve alimentar `PUBLIC_API_BASE_URL`; a origem do
-Pages deve alimentar `WEB_APP_ORIGIN` e as três variáveis públicas `VITE_*`.
+O endpoint público `https://app.maxio.com.br/glowdc` alimenta
+`PUBLIC_API_BASE_URL`; `WEB_APP_ORIGIN` é `https://app.maxio.com.br`. As três
+variáveis públicas `VITE_*` são injetadas durante o build.
 Somente a anon key do Supabase vai ao frontend.
 
 ## Supabase
@@ -42,6 +43,17 @@ Somente a anon key do Supabase vai ao frontend.
 Aplique `supabase/migrations` em um projeto novo. Desabilite cadastro público e
 convide a equipe pela área Auth. O primeiro usuário cria o workspace pelo
 painel; a RPC transacional o torna owner.
+
+Para provisionamento administrativo, injete `SUPABASE_ACCESS_TOKEN` e
+`SUPABASE_PROJECT_REF` apenas no processo e execute
+`scripts/supabase-admin.mjs`. O script confirma nome e referência do projeto,
+recusa tabelas-alvo preexistentes e não imprime respostas administrativas em
+falhas. A aplicação por Management API é um baseline; antes de adotar o CLI no
+mesmo projeto, marque `202609290001` como aplicada no histórico de migrações.
+
+O runtime também exige `SUPABASE_SERVICE_ROLE_KEY`; o frontend exige a chave
+anon/publishable como `VITE_SUPABASE_ANON_KEY`. Nenhuma dessas chaves deve ser
+versionada.
 
 ## Ativação segura
 
@@ -79,4 +91,3 @@ A v1 marca envelopes como `v1`, mas não faz rotação automática. Para trocar
 chaves, implemente um job auditado que decifre com a versão anterior e cifre
 com a nova antes de remover a chave antiga. Nunca apenas substitua o segredo:
 isso tornaria credenciais e identidades existentes irrecuperáveis.
-

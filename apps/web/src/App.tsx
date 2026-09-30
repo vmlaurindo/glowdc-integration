@@ -45,6 +45,12 @@ export function App() {
     return () => data.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (loading) return;
+    const target = session ? "/glowdc/dashboard" : "/glowdc/login";
+    if (window.location.pathname !== target) window.history.replaceState(null, "", target);
+  }, [loading, session]);
+
   if (loading) return <LoadingScreen />;
   if (!session) return <Login />;
   return <Dashboard session={session} />;

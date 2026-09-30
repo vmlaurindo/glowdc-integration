@@ -1,6 +1,6 @@
 # ADR 0001 — Cloudflare, Supabase e UAZAPI
 
-Status: aceito.
+Status: aceito; hospedagem do frontend alterada pelo ADR 0002.
 
 ## Decisão
 
@@ -20,4 +20,3 @@ Há duas superfícies de persistência e duas filas que precisam de reconciliaç
 Em troca, recebimento rápido, retry e retenção curta não sobrecarregam o banco
 de negócio. O novo projeto Supabase gera custo e deverá ser provisionado apenas
 após confirmação explícita; esta base contém configuração, não provisionamento.
-
