@@ -48,4 +48,14 @@ describe("local admin mock", () => {
       body: JSON.stringify({ role: "admin" })
     })).rejects.toThrow("last_owner_required");
   });
+
+  it("updates the synthetic account without persistence outside the mock", async () => {
+    const api = createMockApi();
+    const response = await api<{ data: { name: string; email: string } }>("/api/account", {
+      method: "PATCH",
+      body: JSON.stringify({ name: "Pessoa de demonstração", email: "pessoa@maxio.example", photoUrl: null })
+    });
+    expect(response.data).toEqual(expect.objectContaining({ name: "Pessoa de demonstração", email: "pessoa@maxio.example" }));
+    await expect(api("/api/account/password", { method: "POST", body: JSON.stringify({ password: "curta" }) })).rejects.toThrow("weak_password");
+  });
 });

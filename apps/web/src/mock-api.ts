@@ -32,9 +32,16 @@ type MockState = {
   workspaces: MockWorkspace[];
   members: Record<string, MockMember[]>;
   audits: Record<string, MockAudit[]>;
+  account: {
+    userId: string;
+    name: string;
+    email: string;
+    photoUrl: string | null;
+  };
 };
 
 const GLOW_ID = "11111111-1111-4111-8111-111111111111";
+const MOCK_USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 function initialState(): MockState {
   return {
@@ -48,7 +55,7 @@ function initialState(): MockState {
     }],
     members: {
       [GLOW_ID]: [
-        { userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", email: LOCAL_MOCK_EMAIL, role: "owner", status: "active", createdAt: "2026-09-29T13:20:00.000Z" },
+        { userId: MOCK_USER_ID, email: LOCAL_MOCK_EMAIL, role: "owner", status: "active", createdAt: "2026-09-29T13:20:00.000Z" },
         { userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", email: "operacao@maxio.example", role: "admin", status: "active", createdAt: "2026-09-29T15:35:00.000Z" },
         { userId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", email: "midia@maxio.example", role: "operator", status: "active", createdAt: "2026-09-30T09:10:00.000Z" },
         { userId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", email: "cliente.exemplo@glowdc.test", role: "viewer", status: "pending", createdAt: "2026-09-30T12:00:00.000Z" }
@@ -62,7 +69,8 @@ function initialState(): MockState {
         { id: "audit-04", createdAt: "2026-09-29T16:05:00.000Z", actorEmail: LOCAL_MOCK_EMAIL, action: "uazapi.webhook.installed", targetType: "conexão", targetLabel: "WhatsApp comercial", detail: "Webhook de entrada instalado" },
         { id: "audit-05", createdAt: "2026-09-29T13:20:00.000Z", actorEmail: LOCAL_MOCK_EMAIL, action: "workspace.created", targetType: "workspace", targetLabel: "GlowDC", detail: "Workspace criado com identificador glowdc" }
       ]
-    }
+    },
+    account: { userId: MOCK_USER_ID, name: "Administração MAXIO", email: LOCAL_MOCK_EMAIL, photoUrl: null }
   };
 }
 
@@ -101,7 +109,7 @@ export function createMockApi() {
     entries.unshift({
       id: `audit-${crypto.randomUUID()}`,
       createdAt: now(),
-      actorEmail: LOCAL_MOCK_EMAIL,
+      actorEmail: state.account.email,
       ...input
     });
     state.audits[workspaceId] = entries;
@@ -121,6 +129,29 @@ export function createMockApi() {
       return { data: { platformAdmin: true, canAccessAdmin: true } } as T;
     }
 
+    if (url.pathname === "/api/account" && method === "GET") {
+      return { data: state.account } as T;
+    }
+
+    if (url.pathname === "/api/account" && method === "PATCH") {
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+      const photoUrl = body.photoUrl === null || typeof body.photoUrl === "string" ? body.photoUrl : state.account.photoUrl;
+      if (name.length < 2 || !email.includes("@")) mockError("invalid_account");
+      state.account = { ...state.account, name, email, photoUrl };
+      for (const members of Object.values(state.members)) {
+        const ownMembership = members.find((member) => member.userId === MOCK_USER_ID);
+        if (ownMembership) ownMembership.email = email;
+      }
+      return { data: state.account } as T;
+    }
+
+    if (url.pathname === "/api/account/password" && method === "POST") {
+      const password = typeof body.password === "string" ? body.password : "";
+      if (password.length < 12) mockError("weak_password");
+      return { data: { updated: true } } as T;
+    }
+
     if (url.pathname === "/api/admin/workspaces" && method === "GET") {
       return { data: state.workspaces } as T;
     }
@@ -134,7 +165,7 @@ export function createMockApi() {
       const createdAt = now();
       const workspace = { id, name, slug, memberCount: 1, createdAt, updatedAt: createdAt };
       state.workspaces.push(workspace);
-      state.members[id] = [{ userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", email: LOCAL_MOCK_EMAIL, role: "owner", status: "active", createdAt }];
+      state.members[id] = [{ userId: MOCK_USER_ID, email: state.account.email, role: "owner", status: "active", createdAt }];
       state.audits[id] = [];
       addAudit(id, { action: "workspace.created", targetType: "workspace", targetLabel: name, detail: `Workspace criado com identificador ${slug}` });
       return { data: workspace } as T;

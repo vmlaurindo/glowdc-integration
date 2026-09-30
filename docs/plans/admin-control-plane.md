@@ -52,7 +52,8 @@ Dependências de aprovação:
 ## Fatia 5 — interface administrativa
 
 - Atualizar `PRODUCT.md` e `DESIGN.md` com a superfície administrativa.
-- Acrescentar o grupo `Administração` ao shell atual conforme capacidades.
+- Acrescentar `Administração` ao menu contextual do avatar conforme capacidades,
+  sem ocupar a navegação operacional.
 - Construir três superfícies densas e responsivas: Workspaces, Equipe e
   Auditoria, reutilizando tokens, tabelas, feedbacks e temas do Maxio Hub.
 - Mover o formulário de criação para Workspaces e manter um estado orientado
@@ -89,4 +90,3 @@ Dependências de aprovação:
 3. Restaurar a versão anterior do Worker/Assets.
 4. Manter tabelas e colunas aditivas até investigação; não executar downgrade
    destrutivo durante incidente.
-

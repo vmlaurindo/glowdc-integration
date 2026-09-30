@@ -15,8 +15,27 @@ test("validates the local administrative journey with synthetic data", async ({ 
   await expect(page.getByRole("heading", { name: "Pulso da operação" })).toBeVisible();
   await expect(page.getByText("Dados de demonstração")).toBeVisible();
   await expect(page.getByText("GlowDC", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Navegação principal" }).getByRole("button", { name: "Administração" })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Administração" }).click();
+  await page.getByRole("button", { name: "Abrir menu da conta" }).click();
+  await expect(page.getByRole("menuitem", { name: /Conta/ })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /Administração/ })).toBeVisible();
+  await page.getByRole("menuitem", { name: /Conta/ }).click();
+  await expect(page.getByRole("heading", { name: "Minha conta" })).toBeVisible();
+  await page.getByLabel("Nome").fill("Pessoa de demonstração");
+  await page.locator('input[type="file"]').setInputFiles({ name: "avatar.png", mimeType: "image/png", buffer: Buffer.from("synthetic-image") });
+  await expect(page.getByAltText("Foto da conta")).toBeVisible();
+  await page.getByRole("button", { name: "Salvar dados pessoais" }).click();
+  await expect(page.getByText("Dados da conta atualizados.")).toBeVisible();
+  await page.getByLabel("Senha atual").fill("senha-atual-sintetica");
+  await page.getByLabel("Nova senha", { exact: true }).fill("nova-senha-sintetica-2026");
+  await page.getByLabel("Confirmar nova senha").fill("nova-senha-sintetica-2026");
+  await page.getByRole("button", { name: "Atualizar senha" }).click();
+  await expect(page.getByText("Senha atualizada.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Abrir menu da conta" }).click();
+  await expect(page.getByRole("menu").getByText("Pessoa de demonstração", { exact: true })).toBeVisible();
+  await page.getByRole("menuitem", { name: /Administração/ }).click();
   await expect(page.getByRole("heading", { name: "Administração" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Workspaces da agência" })).toBeVisible();
 
@@ -29,6 +48,7 @@ test("validates the local administrative journey with synthetic data", async ({ 
   await page.getByRole("button", { name: /Equipe/ }).click();
   await expect(page.getByRole("heading", { name: "Equipe do workspace" })).toBeVisible();
   await expect(page.getByRole("row", { name: /admin@maxio.example/ })).toBeVisible();
+  await expect(page.locator(".admin-table td").first()).toHaveCSS("display", "table-cell");
   await page.getByRole("button", { name: "Convidar integrante" }).click();
   await page.getByLabel("E-mail").fill("nova.pessoa@exemplo.test");
   await page.locator(".team-editor").getByRole("combobox").selectOption("viewer");
@@ -49,7 +69,9 @@ test("validates the local administrative journey with synthetic data", async ({ 
 test("keeps the administrative mock usable on mobile", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/glowdc/dashboard?mock-admin=1");
-  await page.getByRole("button", { name: "Administração" }).click();
+  await page.getByRole("button", { name: "Abrir menu da conta" }).click();
+  await expect(page.getByRole("menuitem", { name: /Conta/ })).toBeVisible();
+  await page.getByRole("menuitem", { name: /Administração/ }).click();
   await expect(page.getByRole("heading", { name: "Administração" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Equipe/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Auditoria/ })).toBeVisible();

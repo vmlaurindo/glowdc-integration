@@ -70,10 +70,11 @@ revogar o próprio acesso quando isso deixar o workspace sem owner.
 
 ### Navegação
 
-O desktop adiciona um grupo `Administração` à barra lateral. No mobile, as
-entradas administrativas ficam em um menu compacto para não comprimir a barra
-operacional. O grupo só aparece quando a API declarar ao menos uma capacidade
-administrativa para o usuário.
+Administração fica no menu contextual do avatar, junto de Conta e Sair, sem
+competir com a navegação operacional. No desktop, o menu abre a partir da base
+da barra lateral; no mobile, o mesmo gatilho aparece no cabeçalho. A opção
+administrativa só aparece quando a API declarar ao menos uma capacidade para o
+usuário.
 
 ### Workspaces
 
@@ -87,7 +88,7 @@ Ela oferece:
 
 Caminho para o caso solicitado:
 
-`Administração → Workspaces → GlowDC → Editar → Nome → Salvar alterações`.
+`Avatar → Administração → Workspaces → GlowDC → Editar → Nome → Salvar alterações`.
 
 O nome é apresentação e pode mudar sem alterar o ID interno. O identificador é
 mantido estável porque pode participar de automações, URLs e integrações. Uma
@@ -204,7 +205,7 @@ auditada.
 
 ## Critérios observáveis de aceite
 
-1. O administrador global encontra `Administração` e cria um workspace pelo
+1. O administrador global encontra `Administração` no menu do avatar e cria um workspace pelo
    formulário de nome e identificador, mesmo já pertencendo a outro workspace.
 2. Um owner renomeia `GlowDC` pela interface, e o novo nome aparece no seletor
    sem alterar ID ou slug.
@@ -220,4 +221,3 @@ auditada.
    indisponível, o aceite web permanece `BLOCKED`; outro runner pode produzir
    evidência auxiliar, mas não substituir esse gate.
 10. Nenhum convite real, deploy ou outra ação externa ocorre sem confirmação.
-

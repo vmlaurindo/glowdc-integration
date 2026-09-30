@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { api, friendlyError, supabase } from "./lib";
 import { AdminHub } from "./AdminHub";
+import { AccountView, type AccountSummary } from "./AccountView";
 import { isLocalMockMode, LOCAL_MOCK_EMAIL } from "./mock-api";
 import { nextTheme, resolveTheme, THEME_STORAGE_KEY, type Theme } from "./theme";
 
-type Tab = "visao" | "conectar" | "leads" | "operacao" | "admin";
-type IconName = "overview" | "plug" | "leads" | "activity" | "admin" | "sun" | "moon" | "logout" | "eye" | "eyeOff" | "check" | "empty" | "chevron";
+type Tab = "visao" | "conectar" | "leads" | "operacao" | "admin" | "account";
+type IconName = "overview" | "plug" | "leads" | "activity" | "admin" | "account" | "sun" | "moon" | "logout" | "eye" | "eyeOff" | "check" | "empty" | "chevron";
 type Workspace = { id: string; name: string; slug: string };
 type Membership = { role: string; workspaces: Workspace };
 type Connection = {
@@ -136,6 +137,7 @@ function Dashboard({ userEmail, onSignOut, theme, toggleTheme, mockMode = false 
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(true);
   const [canAccessAdmin, setCanAccessAdmin] = useState(false);
+  const [identity, setIdentity] = useState<AccountSummary>({ userId: "", name: "Equipe MAXIO", email: userEmail, photoUrl: null });
 
   const workspace = useMemo(() => memberships.find((item) => item.workspaces.id === workspaceId)?.workspaces, [memberships, workspaceId]);
 
@@ -171,6 +173,10 @@ function Dashboard({ userEmail, onSignOut, theme, toggleTheme, mockMode = false 
 
   useEffect(() => { void Promise.all([loadWorkspaces(), loadAdminContext()]); }, []);
   useEffect(() => { void loadWorkspaceData(workspaceId); }, [workspaceId]);
+  useEffect(() => {
+    if (!mockMode) return;
+    void api<{ data: AccountSummary }>("/api/account").then((response) => setIdentity(response.data));
+  }, [mockMode]);
 
   if (busy) return <LoadingScreen />;
   if (memberships.length === 0) return <WorkspaceSetup onCreated={loadWorkspaces} />;
@@ -187,11 +193,10 @@ function Dashboard({ userEmail, onSignOut, theme, toggleTheme, mockMode = false 
         <nav aria-label="Navegação principal">
           <NavGroup label="Operação"><NavButton active={tab === "visao"} onClick={() => setTab("visao")} icon="overview">Visão geral</NavButton><NavButton active={tab === "leads"} onClick={() => setTab("leads")} icon="leads">Leads</NavButton><NavButton active={tab === "operacao"} onClick={() => setTab("operacao")} icon="activity">Operação</NavButton></NavGroup>
           <NavGroup label="Configuração"><NavButton active={tab === "conectar"} onClick={() => setTab("conectar")} icon="plug">Conectar</NavButton></NavGroup>
-          {canAccessAdmin && <NavGroup label="Governança"><NavButton active={tab === "admin"} onClick={() => setTab("admin")} icon="admin">Administração</NavButton></NavGroup>}
         </nav>
         <div className="sidebar-actions">
           <ThemeToggle theme={theme} onToggle={toggleTheme} expanded />
-          <div className="sidebar-user"><span className="avatar">{userEmail.slice(0, 1).toUpperCase()}</span><div><strong>{userEmail}</strong><small>Equipe MAXIO</small></div><button className="icon-button" aria-label="Sair" title="Sair" onClick={onSignOut}><Icon name="logout" /></button></div>
+          <UserMenu identity={identity} canAccessAdmin={canAccessAdmin} activeTab={tab} onNavigate={setTab} onSignOut={onSignOut} expanded />
         </div>
       </aside>
 
@@ -204,6 +209,7 @@ function Dashboard({ userEmail, onSignOut, theme, toggleTheme, mockMode = false 
             <div className={`health-chip ${healthy ? "healthy" : "attention"}`}><span />{healthy ? "Conexões íntegras" : "Verificar conexões"}</div>
             <label className="workspace-select"><span className="sr-only">Workspace ativo</span><select value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} aria-label="Workspace ativo">{memberships.map((item) => <option key={item.workspaces.id} value={item.workspaces.id}>{item.workspaces.name}</option>)}</select><Icon name="chevron" /></label>
             <div className="mobile-theme"><ThemeToggle theme={theme} onToggle={toggleTheme} /></div>
+            <div className="mobile-user"><UserMenu identity={identity} canAccessAdmin={canAccessAdmin} activeTab={tab} onNavigate={setTab} onSignOut={onSignOut} /></div>
           </div>
         </header>
         {error && <div className="global-notice"><Notice tone="error" dismiss={() => setError("")}>{error}</Notice></div>}
@@ -212,6 +218,7 @@ function Dashboard({ userEmail, onSignOut, theme, toggleTheme, mockMode = false 
         {tab === "leads" && <LeadsView leads={leads} />}
         {tab === "operacao" && <OperationsView operations={operations} />}
         {tab === "admin" && <AdminHub workspaceId={workspaceId} onWorkspacesChanged={loadWorkspaces} />}
+        {tab === "account" && <AccountView onChanged={setIdentity} />}
       </main>
     </div>
   );
@@ -244,6 +251,35 @@ function Brand({ compact = false }: { compact?: boolean }) { return <div classNa
 function ThemeToggle({ theme, onToggle, expanded = false }: { theme: Theme; onToggle: () => void; expanded?: boolean }) { const nextLabel = theme === "dark" ? "Ativar tema claro" : "Ativar tema escuro"; return <button className={`theme-toggle ${expanded ? "expanded" : ""}`} type="button" aria-label={nextLabel} title={nextLabel} onClick={onToggle}><Icon name={theme === "dark" ? "sun" : "moon"} />{expanded && <span>{theme === "dark" ? "Tema claro" : "Tema escuro"}</span>}</button>; }
 function NavGroup({ label, children }: { label: string; children: ReactNode }) { return <div className="nav-group"><p>{label}</p>{children}</div>; }
 function NavButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: IconName; children: string }) { return <button className={active ? "active" : ""} aria-current={active ? "page" : undefined} onClick={onClick}><Icon name={icon} /><span>{children}</span></button>; }
+function UserMenu({ identity, canAccessAdmin, activeTab, onNavigate, onSignOut, expanded = false }: { identity: AccountSummary; canAccessAdmin: boolean; activeTab: Tab; onNavigate: (tab: Tab) => void; onSignOut: () => void; expanded?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
+    const closeEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeEscape); };
+  }, [open]);
+  const navigate = (tab: Tab) => { onNavigate(tab); setOpen(false); };
+  const initial = (identity.name || identity.email || "U").slice(0, 1).toUpperCase();
+  return <div className={`user-menu ${expanded ? "expanded" : "compact"}`} ref={root}>
+    <button type="button" className={`user-menu-trigger ${activeTab === "account" || activeTab === "admin" ? "active" : ""}`} aria-label="Abrir menu da conta" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+      <span className="avatar">{identity.photoUrl ? <img src={identity.photoUrl} alt="" /> : initial}</span>
+      {expanded && <span className="user-menu-copy"><strong>{identity.name}</strong><small>{identity.email}</small></span>}
+      {expanded && <Icon name="chevron" />}
+    </button>
+    {open && <div className="user-popover" role="menu">
+      <header><span className="avatar">{identity.photoUrl ? <img src={identity.photoUrl} alt="" /> : initial}</span><div><strong>{identity.name}</strong><small>{identity.email}</small></div></header>
+      <div className="user-popover-actions">
+        <button role="menuitem" onClick={() => navigate("account")}><Icon name="account" /><span><strong>Conta</strong><small>Perfil e segurança</small></span></button>
+        {canAccessAdmin && <button role="menuitem" onClick={() => navigate("admin")}><Icon name="admin" /><span><strong>Administração</strong><small>Workspaces, equipe e logs</small></span></button>}
+      </div>
+      <button className="user-menu-signout" role="menuitem" onClick={() => { setOpen(false); onSignOut(); }}><Icon name="logout" />Sair</button>
+    </div>}
+  </div>;
+}
 function Metric({ label, value, detail, trend }: { label: string; value: number; detail: string; trend: string }) { return <article className="metric"><div><span>{label}</span><small>{trend}</small></div><strong>{String(value).padStart(2, "0")}</strong><p>{detail}</p></article>; }
 function PanelHeading({ eyebrow, title }: { eyebrow: string; title: string }) { return <header className="panel-heading"><p className="eyebrow">{eyebrow}</p><h2>{title}</h2></header>; }
 function PageTitle({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) { return <section className="page-title"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1></div><p>{description}</p></section>; }
@@ -262,6 +298,7 @@ function Icon({ name }: { name: IconName }) {
     leads: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>,
     activity: <polyline points="3 12 7 12 10 5 14 19 17 12 21 12" />,
     admin: <><path d="M4 21V10l8-5 8 5v11" /><path d="M9 21v-6h6v6" /><path d="M3 21h18" /><path d="M8 11h.01M12 11h.01M16 11h.01" /></>,
+    account: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
     sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41" /></>,
     moon: <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />,
     logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></>,

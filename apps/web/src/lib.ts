@@ -41,6 +41,8 @@ export function friendlyError(error: unknown): string {
     member_already_exists: "Esta pessoa já participa do workspace.",
     last_owner_required: "O workspace precisa manter pelo menos um owner.",
     invite_not_pending: "Este convite não está pendente.",
+    invalid_account: "Revise o nome e o e-mail da conta.",
+    weak_password: "A nova senha precisa ter pelo menos 12 caracteres.",
     invalid_login_credentials: "E-mail ou senha não conferem.",
     session_expired: "Sua sessão expirou. Entre novamente.",
     automatic_webhook_failed: "A instalação automática falhou. Use as instruções manuais exibidas.",
