@@ -68,7 +68,9 @@ function initialState(): MockState {
 
 export function isLocalMockUrl(url: string, development: boolean): boolean {
   if (!development) return false;
-  return new URL(url, "http://localhost").searchParams.get(LOCAL_MOCK_QUERY) === "1";
+  const target = new URL(url, "http://localhost");
+  const isLoopback = target.hostname === "localhost" || target.hostname === "127.0.0.1" || target.hostname === "[::1]";
+  return isLoopback && target.searchParams.get(LOCAL_MOCK_QUERY) === "1";
 }
 
 export function isLocalMockMode(): boolean {
@@ -180,6 +182,7 @@ export function createMockApi() {
       const role = typeof body.role === "string" ? body.role : "";
       const member = (state.members[workspaceId] ?? []).find((item) => item.userId === userId);
       if (!member || !["owner", "admin", "operator", "viewer"].includes(role)) mockError("invalid_member");
+      if (member.role === "owner" && role !== "owner" && (state.members[workspaceId] ?? []).filter((item) => item.role === "owner").length === 1) mockError("last_owner_required", 409);
       const previousRole = member.role;
       member.role = role as MockMember["role"];
       addAudit(workspaceId, { action: "member.role_updated", targetType: "integrante", targetLabel: member.email, detail: `Papel alterado de ${previousRole} para ${role}` });
