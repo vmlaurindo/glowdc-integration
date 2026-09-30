@@ -126,7 +126,7 @@ h2 { letter-spacing: -.025em; }
 
 /* Controls */
 .field { display: grid; gap: .5rem; margin: 1rem 0; }
-.field > span:first-child, .select-label > span { color: var(--text-soft); font-size: .76rem; font-weight: 600; }
+.field > span:first-child, .field > label, .select-label > span { color: var(--text-soft); font-size: .76rem; font-weight: 600; }
 input, select { width: 100%; min-height: 46px; padding: .75rem .85rem; color: var(--text); background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 7px; transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
 input::placeholder { color: var(--muted); opacity: .72; }
 input:hover, select:hover { border-color: var(--line-strong); }

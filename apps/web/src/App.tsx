@@ -34,6 +34,8 @@ type Operation = {
   last_error_code: string | null;
 };
 
+const assetPath = (file: string) => `${import.meta.env.BASE_URL}${file}`;
+
 function initialTheme(): Theme {
   return resolveTheme(window.localStorage.getItem(THEME_STORAGE_KEY), window.matchMedia("(prefers-color-scheme: dark)").matches);
 }
@@ -93,7 +95,7 @@ function Login({ theme, toggleTheme }: { theme: Theme; toggleTheme: () => void }
       <header className="login-topbar"><Brand /><ThemeToggle theme={theme} onToggle={toggleTheme} /></header>
       <section className="login-frame" aria-label="Acesso ao Maxio Hub">
         <div className="login-context">
-          <div className="brand-canvas"><img src="/maxio-hub-brand.png" alt="m.hub" /></div>
+          <div className="brand-canvas"><img src={assetPath("maxio-hub-brand.png")} alt="m.hub" /></div>
           <div className="login-message">
             <p className="eyebrow">Telemetria de conversões</p>
             <h1>O sinal comercial,<br />de ponta a ponta.</h1>
@@ -107,7 +109,7 @@ function Login({ theme, toggleTheme }: { theme: Theme; toggleTheme: () => void }
           <form className="login-form" onSubmit={submit}>
             <div className="form-heading"><p className="eyebrow">Acesso interno</p><h2>Entrar no workspace</h2><p className="muted">Acesso por convite para a equipe da MAXIO COMUNICAÇÃO.</p></div>
             <Field label="E-mail" type="email" value={email} onChange={setEmail} autoComplete="email" placeholder="nome@empresa.com.br" />
-            <label className="field"><span>Senha</span><span className="input-with-action"><input required type={showPassword ? "text" : "password"} value={password} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} /><button type="button" className="field-action" aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"} onClick={() => setShowPassword((current) => !current)}><Icon name={showPassword ? "eyeOff" : "eye"} /></button></span></label>
+            <div className="field"><label htmlFor="login-password">Senha</label><span className="input-with-action"><input id="login-password" required type={showPassword ? "text" : "password"} value={password} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} /><button type="button" className="field-action" aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"} onClick={() => setShowPassword((current) => !current)}><Icon name={showPassword ? "eyeOff" : "eye"} /></button></span></div>
             {error && <Notice tone="error">{error}</Notice>}
             <button className="button primary wide" disabled={busy}>{busy ? "Verificando…" : "Entrar no Maxio Hub"}</button>
             <p className="access-note"><span className="status-dot" /> Ambiente restrito e monitorado</p>
@@ -222,7 +224,7 @@ function LeadsView({ leads }: { leads: Lead[] }) { return <div className="page">
 function OperationsView({ operations }: { operations: Operation[] }) { return <div className="page"><PageTitle eyebrow="Trilho de eventos" title="Operação e entrega" description="Cada marco representa uma conversão deduplicada e seu estado mais recente." />{operations.length === 0 ? <Empty title="O trilho está vazio" body="Eventos pagos completos aparecerão aqui primeiro em observação." /> : <ol className="event-rail">{operations.map((item) => <li key={item.id}><span className={`rail-dot ${item.status}`} /><div className="event-time">{formatDate(item.occurred_at)}</div><div className="event-card"><div><strong>LeadSubmitted</strong><code>{item.event_id.slice(0, 14)}…</code></div><Status value={item.status} />{item.last_error_code && <small>{item.last_error_code}</small>}</div></li>)}</ol>}</div>; }
 function ConnectionRail({ connections, emptyAction }: { connections: Connection[]; emptyAction: () => void }) { if (!connections.length) return <Empty title="Nenhuma origem conectada" body="Cadastre a primeira instância para começar em modo observação." action="Conectar origem" onAction={emptyAction} />; return <ol className="connection-rail">{connections.map((item) => <li key={item.id}><span className={`pulse ${item.status}`} /><div><strong>{item.label}</strong><small>{item.base_url.replace(/^https?:\/\//, "")}</small></div><Status value={item.status} /></li>)}</ol>; }
 
-function Brand({ compact = false }: { compact?: boolean }) { return <div className={`brand ${compact ? "compact" : ""}`}><span className="brand-icon"><img src="/maxio-favicon.svg" alt="" /></span><span className="brand-type"><strong>m.hub</strong><small>MAXIO COMUNICAÇÃO</small></span></div>; }
+function Brand({ compact = false }: { compact?: boolean }) { return <div className={`brand ${compact ? "compact" : ""}`}><span className="brand-icon"><img src={assetPath("maxio-favicon.svg")} alt="" /></span><span className="brand-type"><strong>m.hub</strong><small>MAXIO COMUNICAÇÃO</small></span></div>; }
 function ThemeToggle({ theme, onToggle, expanded = false }: { theme: Theme; onToggle: () => void; expanded?: boolean }) { const nextLabel = theme === "dark" ? "Ativar tema claro" : "Ativar tema escuro"; return <button className={`theme-toggle ${expanded ? "expanded" : ""}`} type="button" aria-label={nextLabel} title={nextLabel} onClick={onToggle}><Icon name={theme === "dark" ? "sun" : "moon"} />{expanded && <span>{theme === "dark" ? "Tema claro" : "Tema escuro"}</span>}</button>; }
 function NavGroup({ label, children }: { label: string; children: ReactNode }) { return <div className="nav-group"><p>{label}</p>{children}</div>; }
 function NavButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: IconName; children: string }) { return <button className={active ? "active" : ""} aria-current={active ? "page" : undefined} onClick={onClick}><Icon name={icon} /><span>{children}</span></button>; }
