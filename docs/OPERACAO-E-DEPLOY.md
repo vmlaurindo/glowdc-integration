@@ -18,7 +18,7 @@ O deploy começa com `META_SENDS_ENABLED=false`. Cada conexão também começa e
 
 Cadastre por `wrangler secret put`, sem copiar valores para arquivos:
 
-- `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`;
+- `SUPABASE_URL` e `SUPABASE_SECRET_KEY` (emitida pelo projeto Supabase e usada somente no Worker);
 - `CREDENTIAL_ENCRYPTION_KEY`: 32 bytes aleatórios em base64;
 - `PAYLOAD_ENCRYPTION_KEY`: outra chave de 32 bytes em base64;
 - `IDENTITY_HMAC_KEY`: outra chave de 32 bytes em base64.
@@ -51,9 +51,15 @@ recusa tabelas-alvo preexistentes e não imprime respostas administrativas em
 falhas. A aplicação por Management API é um baseline; antes de adotar o CLI no
 mesmo projeto, marque `202609290001` como aplicada no histórico de migrações.
 
-O runtime também exige `SUPABASE_SERVICE_ROLE_KEY`; o frontend exige a chave
-anon/publishable como `VITE_SUPABASE_ANON_KEY`. Nenhuma dessas chaves deve ser
+O runtime também exige `SUPABASE_SECRET_KEY`; o frontend exige a chave
+publishable como `VITE_SUPABASE_PUBLISHABLE_KEY`. Essas chaves são emitidas pelo
+projeto Supabase, não geradas localmente. Nenhuma delas deve ser
 versionada.
+
+No `.env` operacional, `SUPABASE_PUBLISHABLE_KEY` registra a chave emitida pelo
+projeto e `VITE_SUPABASE_PUBLISHABLE_KEY` contém o mesmo valor sob o nome que o
+Vite permite disponibilizar ao frontend. A chave publishable é pública por
+definição; a segurança dos dados continua dependendo de autenticação e RLS.
 
 ## Ativação segura
 

@@ -1,16 +1,16 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const args = new Set(process.argv.slice(2));
-const mode = ["--inspect", "--apply", "--configure-auth"].find((entry) => args.has(entry));
+const mode = ["--inspect", "--apply", "--configure-auth", "--keys", "--write-env"].find((entry) => args.has(entry));
 const projectRef = process.env.SUPABASE_PROJECT_REF;
 const accessToken = process.env.SUPABASE_ACCESS_TOKEN;
 const expectedName = process.env.SUPABASE_EXPECTED_PROJECT_NAME ?? "Glow DC";
 const apiBase = "https://api.supabase.com/v1";
 
 if (!mode || !projectRef || !accessToken) {
-  console.error("Uso: SUPABASE_PROJECT_REF e SUPABASE_ACCESS_TOKEN + --inspect|--apply|--configure-auth");
+  console.error("Uso: SUPABASE_PROJECT_REF e SUPABASE_ACCESS_TOKEN + --inspect|--apply|--configure-auth|--keys|--write-env");
   process.exit(2);
 }
 
@@ -104,6 +104,84 @@ if (mode === "--configure-auth") {
   }));
 }
 
+if (mode === "--keys" || mode === "--write-env") {
+  const keys = await adminJson(
+    `${apiBase}/projects/${encodeURIComponent(projectRef)}/api-keys?reveal=true`
+  );
+  const publishable = findApiKey(keys, "publishable");
+  const secret = findApiKey(keys, "secret");
+
+  if (mode === "--keys") {
+    console.log(JSON.stringify({
+      project: { id: project.id, name: project.name },
+      keys: {
+        publishable: Boolean(publishable),
+        secret: Boolean(secret)
+      }
+    }));
+  } else {
+    const envPath = process.env.SUPABASE_ENV_PATH;
+    if (!envPath || !publishable || !secret) {
+      console.error("Escrita recusada: caminho do .env ou chaves modernas do projeto ausentes.");
+      process.exit(2);
+    }
+    const absoluteEnvPath = resolve(envPath);
+    const current = readFileSync(absoluteEnvPath, "utf8");
+    const existing = parseEnv(current);
+    const internalKeyNames = [
+      "CREDENTIAL_ENCRYPTION_KEY",
+      "PAYLOAD_ENCRYPTION_KEY",
+      "IDENTITY_HMAC_KEY"
+    ];
+    const generated = [];
+    const internalKeys = Object.fromEntries(internalKeyNames.map((name) => {
+      const currentValue = existing.get(name);
+      if (isBase64Key(currentValue, 32)) return [name, currentValue];
+      generated.push(name);
+      return [name, randomBytes(32).toString("base64")];
+    }));
+    const managedNames = new Set([
+      "SUPABASE_PUBLISHABLE_KEY",
+      "VITE_SUPABASE_PUBLISHABLE_KEY",
+      "SUPABASE_SECRET_KEY",
+      "SUPABASE_ANON_KEY",
+      "SUPABASE_SERVICE_KEY",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      ...internalKeyNames
+    ]);
+    const retained = current
+      .split(/\r?\n/)
+      .filter((line) => {
+        const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+        return !match || !managedNames.has(match[1]);
+      })
+      .join("\n")
+      .replace(/\s+$/, "");
+    const managedSection = [
+      "# Supabase: chaves emitidas pelo projeto Glow DC; não são segredos aleatórios locais.",
+      `SUPABASE_PUBLISHABLE_KEY=${apiKeyValue(publishable)}`,
+      `VITE_SUPABASE_PUBLISHABLE_KEY=${apiKeyValue(publishable)}`,
+      `SUPABASE_SECRET_KEY=${apiKeyValue(secret)}`,
+      "",
+      "# Criptografia interna: segredos independentes de 32 bytes codificados em base64.",
+      "# Não reutilize entre finalidades. A rotação exige procedimento de migração dos dados cifrados.",
+      ...internalKeyNames.map((name) => `${name}=${internalKeys[name]}`)
+    ].join("\n");
+    writeFileSync(absoluteEnvPath, `${retained}\n\n${managedSection}\n`, { encoding: "utf8", mode: 0o600 });
+    console.log(JSON.stringify({
+      written: true,
+      project: { id: project.id, name: project.name },
+      variables: [
+        "SUPABASE_PUBLISHABLE_KEY",
+        "VITE_SUPABASE_PUBLISHABLE_KEY",
+        "SUPABASE_SECRET_KEY",
+        ...internalKeyNames
+      ],
+      generatedInternalKeys: generated
+    }));
+  }
+}
+
 async function query(sql) {
   return adminJson(`${apiBase}/projects/${encodeURIComponent(projectRef)}/database/query`, {
     method: "POST",
@@ -129,4 +207,31 @@ async function adminJson(url, init = {}) {
 
 function normalize(value) {
   return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+}
+
+function findApiKey(keys, type) {
+  if (!Array.isArray(keys)) return null;
+  return keys.find((entry) => entry?.type === type && apiKeyValue(entry)) ?? null;
+}
+
+function apiKeyValue(entry) {
+  return String(entry?.api_key ?? entry?.key ?? "");
+}
+
+function parseEnv(source) {
+  const values = new Map();
+  for (const line of source.split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (match) values.set(match[1], match[2]);
+  }
+  return values;
+}
+
+function isBase64Key(value, byteLength) {
+  if (!value || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
+  try {
+    return Buffer.from(value, "base64").length === byteLength;
+  } catch {
+    return false;
+  }
 }

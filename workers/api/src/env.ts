@@ -4,7 +4,7 @@ export interface Env {
   WHATSAPP_INGEST_QUEUE: Queue<IngestQueueMessage>;
   META_DELIVERY_QUEUE: Queue<MetaQueueMessage>;
   SUPABASE_URL: string;
-  SUPABASE_SERVICE_ROLE_KEY: string;
+  SUPABASE_SECRET_KEY: string;
   PUBLIC_API_BASE_URL: string;
   CREDENTIAL_ENCRYPTION_KEY: string;
   PAYLOAD_ENCRYPTION_KEY: string;

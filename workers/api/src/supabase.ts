@@ -35,8 +35,7 @@ export async function supabaseJson<T>(
   const response = await fetch(`${env.SUPABASE_URL.replace(/\/$/, "")}${path}`, {
     ...init,
     headers: {
-      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      apikey: env.SUPABASE_SECRET_KEY,
       "Content-Type": "application/json",
       ...init.headers
     }
