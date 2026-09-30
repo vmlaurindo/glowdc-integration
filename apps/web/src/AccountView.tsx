@@ -104,4 +104,3 @@ export function AccountView({ onChanged }: { onChanged: (account: AccountSummary
     </div>
   );
 }
-

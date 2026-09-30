@@ -47,4 +47,3 @@ Eles não existem no Worker real nesta etapa.
 5. O menu funciona por teclado, fecha com `Escape` e fecha ao clicar fora.
 6. Desktop e mobile não apresentam rolagem horizontal da página.
 7. Testes confirmam ausência de chamadas aos ambientes remotos.
-
