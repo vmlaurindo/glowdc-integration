@@ -36,6 +36,9 @@ arquivo e aplique a migração. Gere primeiro `apps/web/dist`; o binding
 O primeiro provisionamento usa `scripts/cloudflare-secrets.mjs` para enviar
 somente os cinco segredos obrigatórios via stdin ao Wrangler. O script lê o
 `.env` operacional, não cria arquivo intermediário e não imprime valores.
+Após o deploy, `scripts/smoke-production.mjs` autentica o administrador e
+confirma health check, workspace e papel efetivo sem registrar credenciais ou
+identificadores. A validação visual continua obrigatoriamente no Playwright MCP.
 
 O endpoint público `https://app.maxio.com.br/glowdc` alimenta
 `PUBLIC_API_BASE_URL`; `WEB_APP_ORIGIN` é `https://app.maxio.com.br`. As três
