@@ -6,7 +6,7 @@ Esta base não cria nem cobra recursos automaticamente. Antes do primeiro
 deploy, confirme nominalmente:
 
 1. projeto Supabase dedicado e plano contratado;
-2. conta Cloudflare, banco D1, duas filas, duas DLQs e rota do Worker;
+2. conta Cloudflare `MAXIO COMUNICAÇÃO`, banco D1, duas filas, duas DLQs e rota do Worker;
 3. instância UAZAPI de teste e hostname incluído na allowlist;
 4. dataset/page da Meta e versão Graph suportada;
 5. ambiente de teste, nunca produção, para o primeiro percurso.
@@ -33,6 +33,10 @@ Substitua o ID D1 em `workers/api/wrangler.toml`, crie as filas descritas no
 arquivo e aplique a migração. Gere primeiro `apps/web/dist`; o binding
 `ASSETS` publica esse bundle pelo mesmo Worker.
 
+O primeiro provisionamento usa `scripts/cloudflare-secrets.mjs` para enviar
+somente os cinco segredos obrigatórios via stdin ao Wrangler. O script lê o
+`.env` operacional, não cria arquivo intermediário e não imprime valores.
+
 O endpoint público `https://app.maxio.com.br/glowdc` alimenta
 `PUBLIC_API_BASE_URL`; `WEB_APP_ORIGIN` é `https://app.maxio.com.br`. As três
 variáveis públicas `VITE_*` são injetadas durante o build.
@@ -43,6 +47,10 @@ Somente a anon key do Supabase vai ao frontend.
 Aplique `supabase/migrations` em um projeto novo. Desabilite cadastro público e
 convide a equipe pela área Auth. O primeiro usuário cria o workspace pelo
 painel; a RPC transacional o torna owner.
+
+O bootstrap inicial pode ser executado com `scripts/bootstrap-admin.mjs`. Ele
+gera ou preserva uma senha hex de 12 caracteres no `.env`, cria o usuário Auth
+confirmado e o workspace `Glow DC`, sem imprimir a senha ou identificadores.
 
 Para provisionamento administrativo, injete `SUPABASE_ACCESS_TOKEN` e
 `SUPABASE_PROJECT_REF` apenas no processo e execute

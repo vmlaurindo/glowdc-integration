@@ -1,4 +1,5 @@
 name = "glowdc-integration-api"
+account_id = "621f9488fbd5405db3dd538b158092e2"
 main = "src/index.ts"
 compatibility_date = "2026-09-29"
 workers_dev = true
@@ -18,7 +19,7 @@ not_found_handling = "single-page-application"
 run_worker_first = true
 
 [vars]
-APP_ENV = "development"
+APP_ENV = "production"
 APP_BASE_PATH = "/glowdc"
 PUBLIC_API_BASE_URL = "https://app.maxio.com.br/glowdc"
 META_SENDS_ENABLED = "false"
@@ -31,7 +32,7 @@ AUDIT_RETENTION_DAYS = "60"
 [[d1_databases]]
 binding = "DB"
 database_name = "glowdc-integration-ops"
-database_id = "REPLACE_AFTER_PROVISIONING"
+database_id = "79af0995-c4ac-4a26-aa82-afcf68fae610"
 migrations_dir = "migrations"
 
 [[queues.producers]]
