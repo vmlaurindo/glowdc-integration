@@ -8,8 +8,9 @@ import { processDelivery } from "./ingest";
 import { deliverMetaConversion, RetryableDeliveryError } from "./meta-delivery";
 import { insertDelivery, loadDelivery, resetDelivery } from "./operational";
 import { assertAllowedProviderUrl, extractWebhookToken, sanitizePayload } from "./security";
-import { findConnection, patchRows, requireWorkspaceMember, supabaseJson, writeAudit } from "./supabase";
+import { findConnection, isPlatformAdmin, patchRows, requireWorkspaceMember, supabaseAuthJson, supabaseJson, workspaceRole, writeAudit } from "./supabase";
 import { installUazapiWebhook, testUazapiConnection, type UazapiCredentials } from "./uazapi";
+import { auditDetail, canManageRole, isUuid, isWorkspaceRole } from "./admin-policy";
 
 type AppBindings = { Bindings: Env; Variables: AuthVariables };
 const app = new Hono<AppBindings>();
@@ -17,7 +18,7 @@ const app = new Hono<AppBindings>();
 app.use("/api/*", async (context, next) => cors({
   origin: context.env.WEB_APP_ORIGIN,
   allowHeaders: ["Authorization", "Content-Type"],
-  allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+  allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   credentials: true
 })(context, next));
 app.use("/api/*", requireAuth);
@@ -35,6 +36,9 @@ app.get("/api/workspaces", async (context) => {
 });
 
 app.post("/api/workspaces", async (context) => {
+  if (!await isPlatformAdmin(context.env, context.get("userId"))) {
+    return context.json({ error: "workspace_access_denied" }, 403);
+  }
   const parsed = createWorkspaceSchema.safeParse(await context.req.json().catch(() => null));
   if (!parsed.success) return context.json({ error: "invalid_workspace", fields: parsed.error.flatten().fieldErrors }, 400);
   const rows = await supabaseJson(context.env, "/rest/v1/rpc/create_workspace", {
@@ -46,6 +50,279 @@ app.post("/api/workspaces", async (context) => {
     })
   });
   return context.json({ data: rows }, 201);
+});
+
+app.get("/api/admin/context", async (context) => {
+  const userId = context.get("userId");
+  const [platformAdmin, memberships] = await Promise.all([
+    isPlatformAdmin(context.env, userId),
+    supabaseJson<Array<{ workspace_id: string; role: string }>>(
+      context.env,
+      `/rest/v1/workspace_members?user_id=eq.${encodeURIComponent(userId)}&select=workspace_id,role`
+    )
+  ]);
+  const workspaceAdminIds = memberships
+    .filter((entry) => entry.role === "owner" || entry.role === "admin")
+    .map((entry) => entry.workspace_id);
+  return context.json({ data: {
+    platformAdmin,
+    canAccessAdmin: platformAdmin || workspaceAdminIds.length > 0,
+    canCreateWorkspace: platformAdmin,
+    workspaceIds: workspaceAdminIds
+  } });
+});
+
+app.get("/api/admin/workspaces", async (context) => {
+  const userId = context.get("userId");
+  const platformAdmin = await isPlatformAdmin(context.env, userId);
+  let allowedIds: string[] = [];
+  if (!platformAdmin) {
+    const memberships = await supabaseJson<Array<{ workspace_id: string }>>(
+      context.env,
+      `/rest/v1/workspace_members?user_id=eq.${encodeURIComponent(userId)}` +
+        "&role=in.(owner,admin)&select=workspace_id"
+    );
+    allowedIds = memberships.map((entry) => entry.workspace_id);
+    if (!allowedIds.length) return context.json({ error: "workspace_access_denied" }, 403);
+  }
+  const workspaceFilter = platformAdmin ? "" : `&id=in.(${allowedIds.join(",")})`;
+  const workspaces = await supabaseJson<Array<{
+    id: string; name: string; slug: string; created_at: string; updated_at: string;
+  }>>(context.env,
+    `/rest/v1/workspaces?select=id,name,slug,created_at,updated_at${workspaceFilter}&order=created_at.asc`
+  );
+  const ids = workspaces.map((entry) => entry.id);
+  const memberships = ids.length ? await supabaseJson<Array<{ workspace_id: string; role: string }>>(
+    context.env,
+    `/rest/v1/workspace_members?workspace_id=in.(${ids.join(",")})&select=workspace_id,role`
+  ) : [];
+  const ownRoles = new Map(allowedIds.length ? (await supabaseJson<Array<{ workspace_id: string; role: string }>>(
+    context.env,
+    `/rest/v1/workspace_members?user_id=eq.${encodeURIComponent(userId)}&workspace_id=in.(${ids.join(",")})&select=workspace_id,role`
+  )).map((entry) => [entry.workspace_id, entry.role]) : []);
+  return context.json({ data: workspaces.map((workspace) => ({
+    id: workspace.id,
+    name: workspace.name,
+    slug: workspace.slug,
+    createdAt: workspace.created_at,
+    updatedAt: workspace.updated_at,
+    memberCount: memberships.filter((entry) => entry.workspace_id === workspace.id).length,
+    canEdit: platformAdmin || ownRoles.get(workspace.id) === "owner"
+  })), canCreate: platformAdmin });
+});
+
+app.post("/api/admin/workspaces", async (context) => {
+  if (!await isPlatformAdmin(context.env, context.get("userId"))) {
+    return context.json({ error: "workspace_access_denied" }, 403);
+  }
+  const parsed = createWorkspaceSchema.safeParse(await context.req.json().catch(() => null));
+  if (!parsed.success) return context.json({ error: "invalid_workspace", fields: parsed.error.flatten().fieldErrors }, 400);
+  try {
+    const rows = await supabaseJson<Array<Record<string, unknown>>>(context.env, "/rest/v1/rpc/create_workspace", {
+      method: "POST",
+      body: JSON.stringify({ p_name: parsed.data.name, p_slug: parsed.data.slug, p_owner_id: context.get("userId") })
+    });
+    return context.json({ data: rows[0] ?? null }, 201);
+  } catch (error) {
+    if (isUniqueConflict(error)) return context.json({ error: "workspace_slug_conflict" }, 409);
+    throw error;
+  }
+});
+
+app.patch("/api/admin/workspaces/:id", async (context) => {
+  const workspaceId = context.req.param("id");
+  if (!isUuid(workspaceId)) return context.json({ error: "workspace_not_found" }, 404);
+  const platformAdmin = await isPlatformAdmin(context.env, context.get("userId"));
+  const role = platformAdmin ? "platform_admin" : await workspaceRole(context.env, workspaceId, context.get("userId"));
+  if (role !== "platform_admin" && role !== "owner") return context.json({ error: "workspace_access_denied" }, 403);
+  const body = await context.req.json().catch(() => null) as { name?: unknown } | null;
+  const name = typeof body?.name === "string" ? body.name.trim() : "";
+  if (name.length < 2 || name.length > 100) return context.json({ error: "invalid_workspace" }, 400);
+  try {
+    const rows = await supabaseJson<Record<string, unknown>>(context.env, "/rest/v1/rpc/admin_update_workspace_name", {
+      method: "POST",
+      body: JSON.stringify({ p_workspace_id: workspaceId, p_actor_user_id: context.get("userId"), p_name: name })
+    });
+    return context.json({ data: rows });
+  } catch (error) {
+    if (isDatabaseError(error, "workspace_not_found")) return context.json({ error: "workspace_not_found" }, 404);
+    throw error;
+  }
+});
+
+app.get("/api/admin/workspaces/:id/members", async (context) => {
+  const workspaceId = context.req.param("id");
+  if (!isUuid(workspaceId)) return context.json({ error: "workspace_not_found" }, 404);
+  const role = await workspaceAdminRole(context.env, workspaceId, context.get("userId"));
+  if (!role) return context.json({ error: "workspace_access_denied" }, 403);
+  const rows = await supabaseJson<Array<{ user_id: string; role: string; created_at: string }>>(
+    context.env,
+    `/rest/v1/workspace_members?workspace_id=eq.${encodeURIComponent(workspaceId)}` +
+      "&select=user_id,role,created_at&order=created_at.asc&limit=200"
+  );
+  const authUsers = await loadAuthUsers(context.env, rows.map((row) => row.user_id));
+  const userMap = new Map(authUsers.map((user) => [user.id, user]));
+  return context.json({ canManageAll: role !== "admin", data: rows.map((member) => {
+    const user = userMap.get(member.user_id);
+    return {
+      userId: member.user_id,
+      email: user?.email ?? "Conta indisponível",
+      role: member.role,
+      status: user?.email_confirmed_at ? "active" : "pending",
+      createdAt: member.created_at
+    };
+  }) });
+});
+
+app.post("/api/admin/workspaces/:id/members", async (context) => {
+  const workspaceId = context.req.param("id");
+  if (!isUuid(workspaceId)) return context.json({ error: "workspace_not_found" }, 404);
+  const role = await workspaceAdminRole(context.env, workspaceId, context.get("userId"));
+  if (!role) return context.json({ error: "workspace_access_denied" }, 403);
+  const body = await context.req.json().catch(() => null) as { email?: unknown; role?: unknown } | null;
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const memberRole = typeof body?.role === "string" ? body.role : "";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !isWorkspaceRole(memberRole)) {
+    return context.json({ error: "invalid_member" }, 400);
+  }
+  if (!canManageRole(role, memberRole)) return context.json({ error: "workspace_access_denied" }, 403);
+  const existingId = await supabaseJson<string | null>(context.env, "/rest/v1/rpc/admin_find_auth_user_by_email", {
+    method: "POST", body: JSON.stringify({ p_email: email })
+  });
+  let invitedUser: AuthUser | null = null;
+  if (existingId) {
+    const current = await workspaceRole(context.env, workspaceId, existingId);
+    if (current) return context.json({ error: "member_already_exists" }, 409);
+    invitedUser = (await loadAuthUsers(context.env, [existingId]))[0] ?? { id: existingId };
+  }
+  if (!invitedUser) {
+    try {
+      invitedUser = await supabaseAuthJson<AuthUser>(context.env,
+        `/invite?redirect_to=${encodeURIComponent(`${context.env.WEB_APP_ORIGIN}/glowdc/login`)}`,
+        { method: "POST", body: JSON.stringify({ email, data: {} }) }
+      );
+    } catch {
+      return context.json({ error: "invite_failed" }, 502);
+    }
+  }
+  try {
+    const added = await supabaseJson<boolean>(context.env, "/rest/v1/rpc/admin_add_workspace_member", {
+      method: "POST",
+      body: JSON.stringify({
+        p_workspace_id: workspaceId,
+        p_target_user_id: invitedUser.id,
+        p_actor_user_id: context.get("userId"),
+        p_role: memberRole
+      })
+    });
+    if (!added) return context.json({ error: "member_already_exists" }, 409);
+    return context.json({ data: { userId: invitedUser.id, email, role: memberRole, status: invitedUser.email_confirmed_at ? "active" : "pending" } }, 201);
+  } catch (error) {
+    if (isDatabaseError(error, "workspace_not_found")) return context.json({ error: "workspace_not_found" }, 404);
+    throw error;
+  }
+});
+
+app.patch("/api/admin/workspaces/:id/members/:userId", async (context) => {
+  const workspaceId = context.req.param("id");
+  const targetUserId = context.req.param("userId");
+  if (!isUuid(workspaceId) || !isUuid(targetUserId)) return context.json({ error: "member_not_found" }, 404);
+  const role = await workspaceAdminRole(context.env, workspaceId, context.get("userId"));
+  if (!role) return context.json({ error: "workspace_access_denied" }, 403);
+  const body = await context.req.json().catch(() => null) as { role?: unknown } | null;
+  const nextRole = typeof body?.role === "string" ? body.role : "";
+  const previousRole = await workspaceRole(context.env, workspaceId, targetUserId);
+  if (!previousRole) return context.json({ error: "member_not_found" }, 404);
+  if (!isWorkspaceRole(nextRole) || !canManageRole(role, nextRole) || !canManageRole(role, previousRole)) {
+    return context.json({ error: "workspace_access_denied" }, 403);
+  }
+  try {
+    await supabaseJson(context.env, "/rest/v1/rpc/admin_set_member_role", {
+      method: "POST",
+      body: JSON.stringify({ p_workspace_id: workspaceId, p_target_user_id: targetUserId, p_actor_user_id: context.get("userId"), p_role: nextRole })
+    });
+    return context.json({ data: { updated: true } });
+  } catch (error) {
+    if (isDatabaseError(error, "last_owner_required")) return context.json({ error: "last_owner_required" }, 409);
+    if (isDatabaseError(error, "member_not_found")) return context.json({ error: "member_not_found" }, 404);
+    throw error;
+  }
+});
+
+app.delete("/api/admin/workspaces/:id/members/:userId", async (context) => {
+  const workspaceId = context.req.param("id");
+  const targetUserId = context.req.param("userId");
+  if (!isUuid(workspaceId) || !isUuid(targetUserId)) return context.json({ error: "member_not_found" }, 404);
+  const role = await workspaceAdminRole(context.env, workspaceId, context.get("userId"));
+  if (!role) return context.json({ error: "workspace_access_denied" }, 403);
+  const targetRole = await workspaceRole(context.env, workspaceId, targetUserId);
+  if (!targetRole) return context.json({ error: "member_not_found" }, 404);
+  if (!canManageRole(role, targetRole)) return context.json({ error: "workspace_access_denied" }, 403);
+  try {
+    await supabaseJson(context.env, "/rest/v1/rpc/admin_revoke_workspace_member", {
+      method: "POST",
+      body: JSON.stringify({ p_workspace_id: workspaceId, p_target_user_id: targetUserId, p_actor_user_id: context.get("userId") })
+    });
+    return context.json({ data: { revoked: true } });
+  } catch (error) {
+    if (isDatabaseError(error, "last_owner_required")) return context.json({ error: "last_owner_required" }, 409);
+    throw error;
+  }
+});
+
+app.post("/api/admin/workspaces/:id/members/:userId/resend", async (context) => {
+  const workspaceId = context.req.param("id");
+  const targetUserId = context.req.param("userId");
+  if (!isUuid(workspaceId) || !isUuid(targetUserId)) return context.json({ error: "invite_not_pending" }, 404);
+  const role = await workspaceAdminRole(context.env, workspaceId, context.get("userId"));
+  if (!role) return context.json({ error: "workspace_access_denied" }, 403);
+  const targetRole = await workspaceRole(context.env, workspaceId, targetUserId);
+  if (!targetRole || !canManageRole(role, targetRole)) return context.json({ error: "invite_not_pending" }, 409);
+  const authUser = (await loadAuthUsers(context.env, [targetUserId]))[0];
+  if (!authUser?.email || authUser.email_confirmed_at || !authUser.invited_at) {
+    return context.json({ error: "invite_not_pending" }, 409);
+  }
+  try {
+    await supabaseAuthJson(context.env, "/resend", {
+      method: "POST",
+      body: JSON.stringify({ type: "signup", email: authUser.email, options: { emailRedirectTo: `${context.env.WEB_APP_ORIGIN}/glowdc/login` } })
+    });
+  } catch {
+    return context.json({ error: "invite_failed" }, 502);
+  }
+  await writeAudit(context.env, {
+    workspaceId, actorUserId: context.get("userId"), action: "member.invite_resent",
+    targetType: "workspace_member", targetId: targetUserId
+  });
+  return context.json({ data: { sent: true } });
+});
+
+app.get("/api/admin/workspaces/:id/audit", async (context) => {
+  const workspaceId = context.req.param("id");
+  if (!isUuid(workspaceId)) return context.json({ error: "workspace_not_found" }, 404);
+  const role = await workspaceAdminRole(context.env, workspaceId, context.get("userId"));
+  if (!role) return context.json({ error: "workspace_access_denied" }, 403);
+  const entries = await supabaseJson<Array<{
+    id: string; actor_user_id: string | null; action: string; target_type: string;
+    target_id: string | null; metadata: Record<string, unknown>; created_at: string;
+  }>>(context.env,
+    `/rest/v1/audit_logs?workspace_id=eq.${encodeURIComponent(workspaceId)}` +
+      "&select=id,actor_user_id,action,target_type,target_id,metadata,created_at&order=created_at.desc,id.desc&limit=50"
+  );
+  const relevantIds = [...new Set(entries.flatMap((entry) => [entry.actor_user_id, entry.target_type === "workspace_member" ? entry.target_id : null].filter((id): id is string => Boolean(id))))];
+  const users = await loadAuthUsers(context.env, relevantIds);
+  const userMap = new Map(users.filter((user) => relevantIds.includes(user.id)).map((user) => [user.id, user.email ?? "Conta indisponível"]));
+  return context.json({ data: entries.map((entry) => ({
+    id: entry.id,
+    createdAt: entry.created_at,
+    actorEmail: entry.actor_user_id ? userMap.get(entry.actor_user_id) ?? "Conta indisponível" : "Sistema",
+    action: entry.action,
+    targetType: entry.target_type === "workspace_member" ? "integrante" : entry.target_type,
+    targetLabel: entry.target_type === "workspace_member" && entry.target_id
+      ? userMap.get(entry.target_id) ?? entry.target_id.slice(0, 8)
+      : entry.target_id?.slice(0, 8) ?? "—",
+    detail: auditDetail(entry.action, entry.metadata)
+  })), nextCursor: null });
 });
 
 app.get("/api/connections", async (context) => {
@@ -310,6 +587,51 @@ app.onError((error, context) => {
   console.error(JSON.stringify({ code: errorCode(error), path: context.req.path }));
   return context.json({ error: "internal_error", code: errorCode(error) }, 500);
 });
+
+type AuthUser = {
+  id: string;
+  email?: string;
+  email_confirmed_at?: string | null;
+  invited_at?: string | null;
+};
+
+async function loadAuthUsers(env: Env, userIds: string[]): Promise<AuthUser[]> {
+  const uniqueIds = [...new Set(userIds)];
+  const all: AuthUser[] = [];
+  for (let offset = 0; offset < uniqueIds.length; offset += 10) {
+    const batch = uniqueIds.slice(offset, offset + 10);
+    const users = await Promise.all(batch.map(async (userId) => {
+      const response = await supabaseAuthJson<AuthUser | { user?: AuthUser }>(
+        env,
+        `/admin/users/${encodeURIComponent(userId)}`
+      );
+      return "user" in response && response.user ? response.user : response as AuthUser;
+    }));
+    all.push(...users);
+  }
+  return all;
+}
+
+async function workspaceAdminRole(env: Env, workspaceId: string, userId: string): Promise<string | null> {
+  if (await isPlatformAdmin(env, userId)) return "platform_admin";
+  const role = await workspaceRole(env, workspaceId, userId);
+  return role === "owner" || role === "admin" ? role : null;
+}
+
+function isUniqueConflict(error: unknown): boolean {
+  return error instanceof Error && /supabase_409/.test(error.message);
+}
+
+function isDatabaseError(error: unknown, code: string): boolean {
+  if (!(error instanceof Error)) return false;
+  const detail = (error as Error & { detail?: string }).detail ?? "";
+  try {
+    const message = JSON.parse(detail) as { message?: string; details?: string; hint?: string };
+    return [message.message, message.details, message.hint].some((value) => value?.includes(code)) || detail.includes(code);
+  } catch {
+    return detail.includes(code);
+  }
+}
 
 async function authorizedConnection(context: Parameters<typeof requireAuth>[0], roles: string[]) {
   const connectionId = context.req.param("id");

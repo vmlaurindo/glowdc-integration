@@ -1,8 +1,10 @@
 # Plano: administração do Maxio Hub
 
-Status: proposto; implementação não iniciada.
+Status: aprovado para entrega live em 2026-09-30; implementação em curso. O
+deploy aguarda o token da Supabase Management API para aplicar a migração e
+associar o primeiro administrador global.
 
-Dependências de aprovação:
+Decisões aprovadas pelo pedido explícito de publicação live:
 
 - `docs/specs/admin-control-plane.md`;
 - `docs/adr/0003-platform-administration.md`.
@@ -77,11 +79,16 @@ Dependências de aprovação:
 
 ## Fatia 7 — aplicação controlada e deploy
 
-- Apresentar evidências e pedir aceite humano antes de aplicar migração remota.
-- Confirmar destinatário antes de qualquer teste de convite real.
+- O deploy live foi autorizado em 2026-09-30.
+- Nenhum convite de teste será enviado; convites operacionais exigem a ação
+  explícita de um administrador e um destinatário real informado no sistema.
 - Aplicar migração e bootstrap sem exibir segredos.
 - Fazer smoke test somente leitura em produção antes de uma mutação controlada.
 - Publicar apenas após aprovação explícita e registrar versão/rollback.
+
+Situação: código, testes e build local concluídos; publicação aguarda
+`SUPABASE_ACCESS_TOKEN` com acesso à Management API no ambiente operacional.
+O valor não deve ser enviado pelo chat.
 
 ## Ordem de rollback
 

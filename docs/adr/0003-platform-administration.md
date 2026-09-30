@@ -1,6 +1,7 @@
 # ADR 0003 — Administração global e por workspace
 
-Status: proposto em 2026-09-30; depende de aprovação humana.
+Status: aceito para implementação em 2026-09-30, junto da autorização de
+publicação live; execução remota depende da credencial de Management API.
 
 ## Contexto
 
@@ -73,4 +74,3 @@ A interface administrativa pode ser removida sem afetar o pipeline. As rotas
 podem ser desativadas e a criação anterior restaurada temporariamente. A tabela
 `platform_admins` e `updated_at` são aditivas; não exigem remoção imediata para
 rollback. Nenhuma migração destrutiva faz parte da decisão.
-

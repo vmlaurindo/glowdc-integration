@@ -11,6 +11,7 @@ type AdminWorkspace = {
   memberCount: number;
   createdAt: string;
   updatedAt: string;
+  canEdit?: boolean;
 };
 
 type Member = {
@@ -45,6 +46,23 @@ const actionLabels: Record<string, string> = {
 
 export function AdminHub({ workspaceId, onWorkspacesChanged }: { workspaceId: string; onWorkspacesChanged: () => Promise<void> }) {
   const [section, setSection] = useState<AdminSection>("workspaces");
+  const [workspaces, setWorkspaces] = useState<AdminWorkspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(workspaceId);
+  const [canCreate, setCanCreate] = useState(false);
+  const [scopeError, setScopeError] = useState("");
+  async function loadWorkspaces() {
+    try {
+      const response = await api<{ data: AdminWorkspace[]; canCreate: boolean }>("/api/admin/workspaces");
+      setWorkspaces(response.data);
+      setCanCreate(response.canCreate);
+      setSelectedWorkspaceId((current) => response.data.some((item) => item.id === current) ? current : response.data[0]?.id ?? "");
+      setScopeError("");
+    } catch (nextError) { setScopeError(friendlyError(nextError)); }
+  }
+  useEffect(() => { void loadWorkspaces(); }, []);
+  async function refreshAll() {
+    await Promise.all([onWorkspacesChanged(), loadWorkspaces()]);
+  }
   return (
     <div className="page admin-page">
       <section className="page-title admin-title">
@@ -56,9 +74,11 @@ export function AdminHub({ workspaceId, onWorkspacesChanged }: { workspaceId: st
         <button className={section === "team" ? "active" : ""} onClick={() => setSection("team")}><span>02</span>Equipe</button>
         <button className={section === "audit" ? "active" : ""} onClick={() => setSection("audit")}><span>03</span>Auditoria</button>
       </nav>
-      {section === "workspaces" && <WorkspacesPanel onChanged={onWorkspacesChanged} />}
-      {section === "team" && <TeamPanel workspaceId={workspaceId} />}
-      {section === "audit" && <AuditPanel workspaceId={workspaceId} />}
+      {scopeError && <AdminNotice tone="error">{scopeError}</AdminNotice>}
+      {section !== "workspaces" && workspaces.length > 1 && <label className="select-label admin-workspace-scope"><span>Workspace administrado</span><select value={selectedWorkspaceId} onChange={(event) => setSelectedWorkspaceId(event.target.value)}>{workspaces.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+      {section === "workspaces" && <WorkspacesPanel onChanged={refreshAll} />}
+      {section === "team" && <TeamPanel workspaceId={selectedWorkspaceId} />}
+      {section === "audit" && <AuditPanel workspaceId={selectedWorkspaceId} />}
     </div>
   );
 }
@@ -71,11 +91,13 @@ function WorkspacesPanel({ onChanged }: { onChanged: () => Promise<void> }) {
   const [slug, setSlug] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [canCreate, setCanCreate] = useState(false);
 
   async function load() {
     try {
-      const response = await api<{ data: AdminWorkspace[] }>("/api/admin/workspaces");
+      const response = await api<{ data: AdminWorkspace[]; canCreate: boolean }>("/api/admin/workspaces");
       setWorkspaces(response.data);
+      setCanCreate(response.canCreate);
     } catch (nextError) { setError(friendlyError(nextError)); }
   }
   useEffect(() => { void load(); }, []);
@@ -105,10 +127,10 @@ function WorkspacesPanel({ onChanged }: { onChanged: () => Promise<void> }) {
 
   return (
     <section className="admin-surface" aria-labelledby="workspaces-heading">
-      <header className="admin-surface-heading"><div><p className="eyebrow">Ambientes</p><h2 id="workspaces-heading">Workspaces da agência</h2><p>O nome pode mudar. O identificador permanece estável para proteger integrações.</p></div><button className="button primary" onClick={startCreate}>Novo workspace</button></header>
+      <header className="admin-surface-heading"><div><p className="eyebrow">Ambientes</p><h2 id="workspaces-heading">Workspaces da agência</h2><p>O nome pode mudar. O identificador permanece estável para proteger integrações.</p></div>{canCreate && <button className="button primary" onClick={startCreate}>Novo workspace</button>}</header>
       {(creating || editing) && <form className="admin-editor" onSubmit={save}><div><p className="eyebrow">{editing ? "Editar workspace" : "Novo workspace"}</p><h3>{editing ? editing.name : "Criar ambiente"}</h3></div><label className="field"><span>Nome</span><input required minLength={2} maxLength={100} value={name} onChange={(event) => setName(event.target.value)} placeholder="Nome do cliente" /></label><label className="field"><span>Identificador</span><input required={!editing} readOnly={Boolean(editing)} value={slug} onChange={(event) => setSlug(event.target.value.toLowerCase())} placeholder="cliente-identificador" /><small>{editing ? "O identificador não pode ser alterado nesta versão." : "Letras minúsculas, números e hífen."}</small></label><div className="admin-editor-actions"><button type="button" className="button secondary" onClick={closeForm}>Cancelar</button><button className="button primary">Salvar alterações</button></div></form>}
       {notice && <AdminNotice tone="success">{notice}</AdminNotice>}{error && <AdminNotice tone="error">{error}</AdminNotice>}
-      <div className="table-wrap admin-table"><table><thead><tr><th>Workspace</th><th>Identificador</th><th>Equipe</th><th>Atualizado</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{workspaces.map((workspace) => <tr key={workspace.id}><td data-label="Workspace"><strong>{workspace.name}</strong><small>{workspace.id.slice(0, 8)}</small></td><td data-label="Identificador"><code>{workspace.slug}</code></td><td data-label="Equipe">{workspace.memberCount} integrantes</td><td data-label="Atualizado">{formatDate(workspace.updatedAt)}</td><td data-label="Ação" className="table-action"><button className="button secondary compact" onClick={() => startEdit(workspace)}>Editar</button></td></tr>)}</tbody></table></div>
+      <div className="table-wrap admin-table"><table><thead><tr><th>Workspace</th><th>Identificador</th><th>Equipe</th><th>Atualizado</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{workspaces.map((workspace) => <tr key={workspace.id}><td data-label="Workspace"><strong>{workspace.name}</strong><small>{workspace.id.slice(0, 8)}</small></td><td data-label="Identificador"><code>{workspace.slug}</code></td><td data-label="Equipe">{workspace.memberCount} integrantes</td><td data-label="Atualizado">{formatDate(workspace.updatedAt)}</td><td data-label="Ação" className="table-action">{workspace.canEdit && <button className="button secondary compact" onClick={() => startEdit(workspace)}>Editar</button>}</td></tr>)}</tbody></table></div>
     </section>
   );
 }
@@ -120,10 +142,11 @@ function TeamPanel({ workspaceId }: { workspaceId: string }) {
   const [inviting, setInviting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [canManageAll, setCanManageAll] = useState(true);
 
   async function load() {
     if (!workspaceId) return;
-    try { const response = await api<{ data: Member[] }>(`/api/admin/workspaces/${workspaceId}/members`); setMembers(response.data); }
+    try { const response = await api<{ data: Member[]; canManageAll?: boolean }>(`/api/admin/workspaces/${workspaceId}/members`); setMembers(response.data); setCanManageAll(response.canManageAll !== false); }
     catch (nextError) { setError(friendlyError(nextError)); }
   }
   useEffect(() => { void load(); }, [workspaceId]);
@@ -151,10 +174,11 @@ function TeamPanel({ workspaceId }: { workspaceId: string }) {
 
   return (
     <section className="admin-surface" aria-labelledby="team-heading">
-      <header className="admin-surface-heading"><div><p className="eyebrow">Acessos</p><h2 id="team-heading">Equipe do workspace</h2><p>Os papéis definem o alcance de cada pessoa neste ambiente.</p></div><button className="button primary" onClick={() => setInviting((current) => !current)}>Convidar integrante</button></header>
-      {inviting && <form className="admin-editor team-editor" onSubmit={invite}><div><p className="eyebrow">Novo acesso</p><h3>Convidar integrante</h3></div><label className="field"><span>E-mail</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="pessoa@empresa.com.br" /></label><label className="field"><span>Papel</span><select value={role} onChange={(event) => setRole(event.target.value as Role)}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><div className="admin-editor-actions"><button type="button" className="button secondary" onClick={() => setInviting(false)}>Cancelar</button><button className="button primary">Enviar convite</button></div></form>}
+      {!workspaceId && <AdminNotice tone="success">Crie ou selecione um workspace para administrar a equipe.</AdminNotice>}
+      <header className="admin-surface-heading"><div><p className="eyebrow">Acessos</p><h2 id="team-heading">Equipe do workspace</h2><p>Os papéis definem o alcance de cada pessoa neste ambiente.</p></div><button className="button primary" disabled={!workspaceId} onClick={() => setInviting((current) => !current)}>Convidar integrante</button></header>
+      {inviting && <form className="admin-editor team-editor" onSubmit={invite}><div><p className="eyebrow">Novo acesso</p><h3>Convidar integrante</h3></div><label className="field"><span>E-mail</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="pessoa@empresa.com.br" /></label><label className="field"><span>Papel</span><select value={role} onChange={(event) => setRole(event.target.value as Role)}>{Object.entries(roleLabels).filter(([value]) => canManageAll || value === "operator" || value === "viewer").map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><div className="admin-editor-actions"><button type="button" className="button secondary" onClick={() => setInviting(false)}>Cancelar</button><button className="button primary">Enviar convite</button></div></form>}
       {notice && <AdminNotice tone="success">{notice}</AdminNotice>}{error && <AdminNotice tone="error">{error}</AdminNotice>}
-      <div className="table-wrap admin-table"><table><thead><tr><th>Integrante</th><th>Estado</th><th>Papel</th><th>Desde</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{members.map((member) => <tr key={member.userId}><td data-label="Integrante"><strong>{member.email}</strong><small>{member.userId.slice(0, 8)}</small></td><td data-label="Estado"><span className={`member-state ${member.status}`}><i />{member.status === "active" ? "Ativo" : "Convite pendente"}</span></td><td data-label="Papel"><select className="role-select" aria-label={`Papel de ${member.email}`} value={member.role} onChange={(event) => void changeRole(member, event.target.value as Role)}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td><td data-label="Desde">{formatDate(member.createdAt)}</td><td data-label="Ações" className="table-actions">{member.status === "pending" && <button className="text-action" onClick={() => void resend(member)}>Reenviar</button>}<button className="text-action danger" onClick={() => void revoke(member)}>Revogar</button></td></tr>)}</tbody></table></div>
+      <div className="table-wrap admin-table"><table><thead><tr><th>Integrante</th><th>Estado</th><th>Papel</th><th>Desde</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{members.map((member) => { const canManageMember = canManageAll || member.role === "operator" || member.role === "viewer"; return <tr key={member.userId}><td data-label="Integrante"><strong>{member.email}</strong><small>{member.userId.slice(0, 8)}</small></td><td data-label="Estado"><span className={`member-state ${member.status}`}><i />{member.status === "active" ? "Ativo" : "Convite pendente"}</span></td><td data-label="Papel"><select disabled={!canManageMember} className="role-select" aria-label={`Papel de ${member.email}`} value={member.role} onChange={(event) => void changeRole(member, event.target.value as Role)}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td><td data-label="Desde">{formatDate(member.createdAt)}</td><td data-label="Ações" className="table-actions">{member.status === "pending" && canManageMember && <button className="text-action" onClick={() => void resend(member)}>Reenviar</button>}{canManageMember && <button className="text-action danger" onClick={() => void revoke(member)}>Revogar</button>}</td></tr>; })}</tbody></table></div>
     </section>
   );
 }
@@ -170,6 +194,7 @@ function AuditPanel({ workspaceId }: { workspaceId: string }) {
   useEffect(() => { void load(); }, [workspaceId]);
   return (
     <section className="admin-surface" aria-labelledby="audit-heading">
+      {!workspaceId && <AdminNotice tone="success">Crie ou selecione um workspace para consultar o histórico.</AdminNotice>}
       <header className="admin-surface-heading"><div><p className="eyebrow">Rastreabilidade</p><h2 id="audit-heading">Log de alterações</h2><p>Ações administrativas e operacionais, sem credenciais ou conteúdo de conversa.</p></div><button className="button secondary" onClick={() => void load()}>Atualizar</button></header>
       {error && <AdminNotice tone="error">{error}</AdminNotice>}
       <ol className="audit-list">{entries.map((entry) => <li key={entry.id}><time dateTime={entry.createdAt}>{formatDate(entry.createdAt)}</time><span className="audit-mark" /><div className="audit-card"><div className="audit-card-heading"><strong>{actionLabels[entry.action] ?? entry.action}</strong><span>{entry.targetType}</span></div><p>{entry.detail}</p><footer><span>{entry.actorEmail}</span><code>{entry.targetLabel}</code></footer></div></li>)}</ol>

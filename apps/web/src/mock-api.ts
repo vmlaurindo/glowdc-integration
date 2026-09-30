@@ -153,7 +153,7 @@ export function createMockApi() {
     }
 
     if (url.pathname === "/api/admin/workspaces" && method === "GET") {
-      return { data: state.workspaces } as T;
+      return { data: state.workspaces.map((workspace) => ({ ...workspace, canEdit: true })), canCreate: true } as T;
     }
 
     if (url.pathname === "/api/admin/workspaces" && method === "POST") {

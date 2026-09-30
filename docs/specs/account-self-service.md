@@ -1,7 +1,7 @@
 # Especificação: autoatendimento da conta
 
-Status: protótipo local solicitado em 2026-09-30; persistência remota ainda não
-aprovada nem implementada.
+Status: persistência em implementação para publicação live autorizada em
+2026-09-30; não inclui integração UAZAPI.
 
 ## Objetivo
 
@@ -18,17 +18,18 @@ administração de workspaces.
 - Recarregar a página restaura todos os valores sintéticos.
 - Nenhuma chamada é feita ao Supabase ou à API live.
 
-## Contrato futuro de produção
+## Contrato de produção
 
-A implementação persistente deverá usar Supabase Auth como única fonte de
-verdade e exigir:
+A implementação persistente usa Supabase Auth como única fonte de verdade e
+exige:
 
 - sessão recente ou nova autenticação para alterar senha;
 - confirmação no endereço novo para troca de e-mail;
-- armazenamento privado e política de remoção para foto de perfil;
-- validação de tipo, tamanho e conteúdo do arquivo no backend;
+- armazenamento privado `profile-photos`, limitado a 2 MB e tipos PNG, JPG e
+  WebP, com política RLS restrita ao diretório da própria conta;
+- alteração de senha após reautenticação com a senha atual;
 - invalidação adequada de sessões após mudanças sensíveis;
-- auditoria de segurança sem registrar senha, token ou conteúdo da foto.
+- nenhuma senha, token ou conteúdo de foto em logs, metadados ou auditoria.
 
 Endpoints simulados pelo protótipo:
 
@@ -36,9 +37,12 @@ Endpoints simulados pelo protótipo:
 - `PATCH /api/account`;
 - `POST /api/account/password`.
 
-Eles não existem no Worker real nesta etapa.
+Essas rotas permanecem somente no mock local. Em produção, perfil, senha e foto
+usam diretamente o SDK do Supabase no navegador autenticado; os tokens de
+serviço nunca chegam ao bundle. Trocas de e-mail passam pelo fluxo de
+confirmação de Supabase Auth.
 
-## Critérios locais de aceite
+## Critérios de aceite
 
 1. O menu do avatar oferece Conta, Administração quando autorizada e Sair.
 2. Administração não aparece na navegação operacional principal.
@@ -46,4 +50,7 @@ Eles não existem no Worker real nesta etapa.
 4. A troca de senha valida confirmação e comprimento mínimo.
 5. O menu funciona por teclado, fecha com `Escape` e fecha ao clicar fora.
 6. Desktop e mobile não apresentam rolagem horizontal da página.
-7. Testes confirmam ausência de chamadas aos ambientes remotos.
+7. O mock local confirma ausência de chamadas aos ambientes remotos.
+8. O caminho real usa Auth/Storage com políticas por `auth.uid()` e não guarda
+   a senha na aplicação.
+9. Nenhum teste envia e-mail de convite nem altera uma senha real.

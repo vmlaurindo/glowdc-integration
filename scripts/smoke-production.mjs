@@ -37,13 +37,26 @@ if (!workspaceResponse.ok || membership?.role !== "owner") {
   fail("Smoke falhou no acesso ao workspace.");
 }
 
+const authHeaders = { Authorization: `Bearer ${data.session.access_token}` };
+const adminContextResponse = await fetch(`${baseUrl}/api/admin/context`, { headers: authHeaders });
+const adminContext = await adminContextResponse.json().catch(() => null);
+if (!adminContextResponse.ok || adminContext?.data?.platformAdmin !== true || adminContext?.data?.canAccessAdmin !== true) {
+  fail("Smoke falhou no contexto administrativo.");
+}
+const adminWorkspacesResponse = await fetch(`${baseUrl}/api/admin/workspaces`, { headers: authHeaders });
+const adminWorkspaces = await adminWorkspacesResponse.json().catch(() => null);
+if (!adminWorkspacesResponse.ok || !adminWorkspaces?.data?.some((entry) => entry?.slug === "glowdc")) {
+  fail("Smoke falhou na listagem administrativa de workspaces.");
+}
+
 await supabase.auth.signOut({ scope: "local" });
 console.log(JSON.stringify({
   passed: true,
   health: true,
   authentication: true,
   workspace: "glowdc",
-  effectiveRole: "owner"
+  effectiveRole: "owner",
+  administration: true
 }));
 
 function parseEnv(input) {

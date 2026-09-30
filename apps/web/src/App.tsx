@@ -136,6 +136,7 @@ function Dashboard({ userEmail, onSignOut, theme, toggleTheme, mockMode = false 
   const [operations, setOperations] = useState<Operation[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(true);
+  const [adminContextLoaded, setAdminContextLoaded] = useState(false);
   const [canAccessAdmin, setCanAccessAdmin] = useState(false);
   const [identity, setIdentity] = useState<AccountSummary>({ userId: "", name: "Equipe MAXIO", email: userEmail, photoUrl: null });
 
@@ -169,17 +170,21 @@ function Dashboard({ userEmail, onSignOut, theme, toggleTheme, mockMode = false 
       const response = await api<{ data: { canAccessAdmin: boolean } }>("/api/admin/context");
       setCanAccessAdmin(response.data.canAccessAdmin);
     } catch { setCanAccessAdmin(false); }
+    finally { setAdminContextLoaded(true); }
   }
 
   useEffect(() => { void Promise.all([loadWorkspaces(), loadAdminContext()]); }, []);
+  useEffect(() => {
+    if (adminContextLoaded && memberships.length === 0 && canAccessAdmin) setTab("admin");
+  }, [adminContextLoaded, canAccessAdmin, memberships.length]);
   useEffect(() => { void loadWorkspaceData(workspaceId); }, [workspaceId]);
   useEffect(() => {
     if (!mockMode) return;
     void api<{ data: AccountSummary }>("/api/account").then((response) => setIdentity(response.data));
   }, [mockMode]);
 
-  if (busy) return <LoadingScreen />;
-  if (memberships.length === 0) return <WorkspaceSetup onCreated={loadWorkspaces} />;
+  if (busy || !adminContextLoaded) return <LoadingScreen />;
+  if (memberships.length === 0 && !canAccessAdmin) return <WorkspacePending onSignOut={onSignOut} />;
 
   const activeCount = connections.filter((item) => item.status === "active").length;
   const sentCount = operations.filter((item) => item.status === "sent").length;
@@ -203,7 +208,7 @@ function Dashboard({ userEmail, onSignOut, theme, toggleTheme, mockMode = false 
       <main className="workspace">
         <header className="topbar">
           <div className="mobile-brand"><Brand compact /></div>
-          <div className="workspace-identity"><p className="eyebrow">Workspace ativo</p><h2>{workspace?.name}</h2></div>
+          <div className="workspace-identity"><p className="eyebrow">Workspace ativo</p><h2>{workspace?.name ?? (tab === "admin" ? "Administração da plataforma" : "Acesso administrativo")}</h2></div>
           <div className="topbar-actions">
             {mockMode && <div className="demo-chip"><span />Dados de demonstração</div>}
             <div className={`health-chip ${healthy ? "healthy" : "attention"}`}><span />{healthy ? "Conexões íntegras" : "Verificar conexões"}</div>
@@ -224,10 +229,8 @@ function Dashboard({ userEmail, onSignOut, theme, toggleTheme, mockMode = false 
   );
 }
 
-function WorkspaceSetup({ onCreated }: { onCreated: () => Promise<void> }) {
-  const [name, setName] = useState(""); const [slug, setSlug] = useState(""); const [error, setError] = useState("");
-  async function submit(event: FormEvent) { event.preventDefault(); try { await api("/api/workspaces", { method: "POST", body: JSON.stringify({ name, slug }) }); await onCreated(); } catch (nextError) { setError(friendlyError(nextError)); } }
-  return <main className="setup-shell"><section className="setup-card"><Brand /><div><p className="eyebrow">Primeira configuração</p><h1>Crie a mesa de operação</h1><p className="muted">Um workspace separa conexões, leads, credenciais e conversões.</p></div><form onSubmit={submit}><Field label="Nome" value={name} onChange={setName} placeholder="GlowDC" /><Field label="Identificador" value={slug} onChange={setSlug} placeholder="glowdc" />{error && <Notice tone="error">{error}</Notice>}<button className="button primary">Criar workspace</button></form></section></main>;
+function WorkspacePending({ onSignOut }: { onSignOut: () => void }) {
+  return <main className="setup-shell"><section className="setup-card"><Brand /><div><p className="eyebrow">Acesso ao workspace</p><h1>Seu acesso está pendente</h1><p className="muted">Esta conta ainda não está associada a um workspace. Peça a um administrador para enviar um convite; o acesso será liberado após a confirmação.</p></div><button type="button" className="button secondary" onClick={onSignOut}>Sair da conta</button></section></main>;
 }
 
 function Overview(props: { connections: Connection[]; leads: Lead[]; operations: Operation[]; activeCount: number; sentCount: number; observedCount: number; goConnect: () => void }) {

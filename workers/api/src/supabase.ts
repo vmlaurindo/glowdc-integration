@@ -49,6 +49,42 @@ export async function supabaseJson<T>(
   return (text ? JSON.parse(text) : null) as T;
 }
 
+export async function supabaseAuthJson<T>(env: Env, path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1${path}`, {
+    ...init,
+    headers: {
+      apikey: env.SUPABASE_SECRET_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SECRET_KEY}`,
+      "Content-Type": "application/json",
+      ...init.headers
+    }
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    const error = new Error(`supabase_auth_${response.status}`);
+    Object.assign(error, { status: response.status, detail: text.slice(0, 500) });
+    throw error;
+  }
+  return (text ? JSON.parse(text) : null) as T;
+}
+
+export async function isPlatformAdmin(env: Env, userId: string): Promise<boolean> {
+  const rows = await supabaseJson<Array<{ user_id: string }>>(
+    env,
+    `/rest/v1/platform_admins?user_id=eq.${encodeURIComponent(userId)}&select=user_id&limit=1`
+  );
+  return rows.length > 0;
+}
+
+export async function workspaceRole(env: Env, workspaceId: string, userId: string): Promise<string | null> {
+  const rows = await supabaseJson<Array<{ role: string }>>(
+    env,
+    `/rest/v1/workspace_members?workspace_id=eq.${encodeURIComponent(workspaceId)}` +
+      `&user_id=eq.${encodeURIComponent(userId)}&select=role&limit=1`
+  );
+  return rows[0]?.role ?? null;
+}
+
 export async function findConnection(env: Env, connectionId: string): Promise<ConnectionRow | null> {
   const rows = await supabaseJson<ConnectionRow[]>(
     env,

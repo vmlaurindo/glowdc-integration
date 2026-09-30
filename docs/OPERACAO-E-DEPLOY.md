@@ -40,9 +40,13 @@ arquivo e aplique a migração. Gere primeiro `apps/web/dist`; o binding
 O primeiro provisionamento usa `scripts/cloudflare-secrets.mjs` para enviar
 somente os cinco segredos obrigatórios via stdin ao Wrangler. O script lê o
 `.env` operacional, não cria arquivo intermediário e não imprime valores.
-Após o deploy, `scripts/smoke-production.mjs` autentica o administrador e
-confirma health check, workspace e papel efetivo sem registrar credenciais ou
-identificadores. A validação visual continua obrigatoriamente no Playwright MCP.
+O deploy autorizado do Worker e do bundle é executado com
+`node scripts/deploy-live.mjs`; o script usa `CF_API_TOKEN`/`CLOUDFLARE_API_TOKEN`
+quando presentes ou a sessão OAuth já autenticada do Wrangler. Nenhum token é
+impresso. Após o deploy, `scripts/smoke-production.mjs`
+autentica o administrador e confirma health check, workspace e papel efetivo
+sem registrar credenciais ou identificadores. A validação visual continua
+obrigatoriamente no Playwright MCP.
 
 O endpoint público `https://app.maxio.com.br/glowdc` alimenta
 `PUBLIC_API_BASE_URL`; `WEB_APP_ORIGIN` é `https://app.maxio.com.br`. As três
@@ -58,6 +62,13 @@ painel; a RPC transacional o torna owner.
 O bootstrap inicial pode ser executado com `scripts/bootstrap-admin.mjs`. Ele
 gera ou preserva uma senha hex de 12 caracteres no `.env`, cria o usuário Auth
 confirmado e o workspace `Glow DC`, sem imprimir a senha ou identificadores.
+
+Para aplicar o controle administrativo, disponibilize `SUPABASE_ACCESS_TOKEN`
+somente no processo ou no `.env` operacional e execute
+`node scripts/supabase-admin.mjs --apply-admin`. O script valida o projeto
+`Glow DC` e a migração aditiva `202609300001_admin_control_plane.sql`. Depois,
+execute `node scripts/bootstrap-platform-admin.mjs` para associar a conta
+administrativa já existente; esse bootstrap não cria conta nem dispara e-mail.
 
 Para provisionamento administrativo, injete `SUPABASE_ACCESS_TOKEN` e
 `SUPABASE_PROJECT_REF` apenas no processo e execute

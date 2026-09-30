@@ -1,6 +1,7 @@
 # Especificação: administração do Maxio Hub
 
-Status: proposta para aprovação humana.
+Status: escopo aprovado para implementação e deploy live em 2026-09-30; a
+migração Supabase ainda depende de credencial de Management API.
 
 ## Problema
 
@@ -220,4 +221,5 @@ auditada.
 9. O caminho web é validado em Playwright MCP headless. Se o MCP continuar
    indisponível, o aceite web permanece `BLOCKED`; outro runner pode produzir
    evidência auxiliar, mas não substituir esse gate.
-10. Nenhum convite real, deploy ou outra ação externa ocorre sem confirmação.
+10. Convites só são enviados após ação explícita de um administrador; validação
+    e deploy não criam convites, conexões ou conversões.

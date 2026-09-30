@@ -3,14 +3,17 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const args = new Set(process.argv.slice(2));
-const mode = ["--inspect", "--apply", "--configure-auth", "--keys", "--write-env"].find((entry) => args.has(entry));
-const projectRef = process.env.SUPABASE_PROJECT_REF;
-const accessToken = process.env.SUPABASE_ACCESS_TOKEN;
-const expectedName = process.env.SUPABASE_EXPECTED_PROJECT_NAME ?? "Glow DC";
+const mode = ["--inspect", "--apply", "--apply-admin", "--configure-auth", "--keys", "--write-env"].find((entry) => args.has(entry));
+const operationalEnv = parseEnv(readFileSync(resolve(process.env.GLOWDC_ENV_PATH ?? "../.env"), "utf8"));
+const projectUrl = process.env.SUPABASE_URL ?? operationalEnv.get("SUPABASE_URL");
+const projectRef = process.env.SUPABASE_PROJECT_REF ?? deriveProjectRef(projectUrl);
+const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? process.env.GLOWDC_SUPABASE_ACCESS_TOKEN ??
+  operationalEnv.get("SUPABASE_ACCESS_TOKEN") ?? operationalEnv.get("GLOWDC_SUPABASE_ACCESS_TOKEN");
+const expectedName = process.env.SUPABASE_EXPECTED_PROJECT_NAME ?? operationalEnv.get("SUPABASE_EXPECTED_PROJECT_NAME") ?? "Glow DC";
 const apiBase = "https://api.supabase.com/v1";
 
 if (!mode || !projectRef || !accessToken) {
-  console.error("Uso: SUPABASE_PROJECT_REF e SUPABASE_ACCESS_TOKEN + --inspect|--apply|--configure-auth|--keys|--write-env");
+  console.error("Uso: SUPABASE_ACCESS_TOKEN + --inspect|--apply|--apply-admin|--configure-auth|--keys|--write-env");
   process.exit(2);
 }
 
@@ -82,6 +85,49 @@ if (mode === "--apply") {
     migration: "202609290001_initial.sql",
     sha256: createHash("sha256").update(sql).digest("hex"),
     verification: verification[0]
+  }));
+}
+
+if (mode === "--apply-admin") {
+  const migrationPath = resolve("supabase/migrations/202609300001_admin_control_plane.sql");
+  const sql = readFileSync(migrationPath, "utf8");
+  if (!sql.includes("CREATE TABLE IF NOT EXISTS public.platform_admins") ||
+      !sql.includes("admin_update_workspace_name") ||
+      /\b(?:DROP\s+TABLE|TRUNCATE)\b/i.test(sql)) {
+    console.error("Aplicação recusada: a migração administrativa não passou pela política aditiva.");
+    process.exit(2);
+  }
+  await query(sql);
+  const verification = await query(`
+    select
+      (select count(*)::int from information_schema.tables
+       where table_schema = 'public' and table_name = 'platform_admins') as admin_table,
+      (select count(*)::int from information_schema.columns
+       where table_schema = 'public' and table_name = 'workspaces' and column_name = 'updated_at') as workspace_updated_at,
+      (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname in (
+         'admin_find_auth_user_by_email',
+         'admin_update_workspace_name','admin_add_workspace_member',
+         'admin_set_member_role','admin_revoke_workspace_member'
+       )) as admin_functions,
+      (select count(*)::int from storage.buckets where id = 'profile-photos' and not public) as private_photo_bucket,
+      (select count(*)::int from pg_policies where schemaname = 'storage' and tablename = 'objects'
+       and policyname like 'profile_photos_%') as photo_policies;
+  `);
+  const result = verification[0] ?? {};
+  const valid = Number(result.admin_table) === 1 && Number(result.workspace_updated_at) === 1 &&
+      Number(result.admin_functions) === 5 && Number(result.private_photo_bucket) === 1 &&
+    Number(result.photo_policies) === 4;
+  if (!valid) {
+    console.error("Migração aplicada, mas a verificação estrutural não atingiu os critérios esperados.");
+    process.exit(1);
+  }
+  console.log(JSON.stringify({
+    applied: true,
+    project: { id: project.id, name: project.name },
+    migration: "202609300001_admin_control_plane.sql",
+    sha256: createHash("sha256").update(sql).digest("hex"),
+    verification: result
   }));
 }
 
@@ -207,6 +253,15 @@ async function adminJson(url, init = {}) {
 
 function normalize(value) {
   return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+}
+
+function deriveProjectRef(value) {
+  try {
+    const host = new URL(String(value)).hostname;
+    return host.endsWith(".supabase.co") ? host.slice(0, -".supabase.co".length) : "";
+  } catch {
+    return "";
+  }
 }
 
 function findApiKey(keys, type) {
