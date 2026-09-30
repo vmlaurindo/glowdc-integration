@@ -27,6 +27,10 @@ Defina `META_GRAPH_VERSION` explicitamente após verificar a versão vigente.
 `UAZAPI_ALLOWED_HOSTS` recebe uma lista separada por vírgula; o padrão aceita
 subdomínios de `.uazapi.com`. Não permita curingas genéricos.
 
+Enquanto `META_SENDS_ENABLED=false`, `META_GRAPH_VERSION` é um gate de ativação
+e nenhuma chamada de conversão pode sair. Defina a versão suportada e repita os
+testes em ambiente de teste antes de alterar o flag global.
+
 ## Recursos Cloudflare
 
 Substitua o ID D1 em `workers/api/wrangler.toml`, crie as filas descritas no
@@ -43,7 +47,7 @@ identificadores. A validação visual continua obrigatoriamente no Playwright MC
 O endpoint público `https://app.maxio.com.br/glowdc` alimenta
 `PUBLIC_API_BASE_URL`; `WEB_APP_ORIGIN` é `https://app.maxio.com.br`. As três
 variáveis públicas `VITE_*` são injetadas durante o build.
-Somente a anon key do Supabase vai ao frontend.
+Somente a chave publishable do Supabase vai ao frontend.
 
 ## Supabase
 
