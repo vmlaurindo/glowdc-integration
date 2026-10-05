@@ -12,6 +12,8 @@ test("validates the local administrative journey with synthetic data", async ({ 
   });
 
   await page.goto("/glowdc/dashboard?mock-admin=1");
+  await expect(page.getByRole("heading", { name: /Qual workspace vamos abrir/ })).toBeVisible();
+  await page.getByRole("button", { name: /GlowDC/ }).first().click();
   await expect(page.getByRole("heading", { name: "Pulso da operação" })).toBeVisible();
   await expect(page.getByText("Dados de demonstração")).toBeVisible();
   await expect(page.getByText("GlowDC", { exact: true }).first()).toBeVisible();
@@ -69,6 +71,8 @@ test("validates the local administrative journey with synthetic data", async ({ 
 test("keeps the administrative mock usable on mobile", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/glowdc/dashboard?mock-admin=1");
+  await expect(page.getByRole("heading", { name: /Qual workspace vamos abrir/ })).toBeVisible();
+  await page.getByRole("button", { name: /GlowDC/ }).first().click();
   await page.getByRole("button", { name: "Abrir menu da conta" }).click();
   await expect(page.getByRole("menuitem", { name: /Conta/ })).toBeVisible();
   await page.getByRole("menuitem", { name: /Administração/ }).click();

@@ -1,4 +1,4 @@
-import { createConnectionSchema, createWorkspaceSchema, activationSchema, metaDestinationSchema, normalizeUazapiInbound } from "@glowdc/contracts";
+import { createAgendorIntegrationSchema, createConnectionSchema, createWorkspaceSchema, activationSchema, connectionSuspensionSchema, updateConnectionSchema, metaDestinationSchema, normalizeUazapiInbound } from "@glowdc/contracts";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { encryptText, decryptText, constantTimeEqual, sha256Hex } from "./crypto";
@@ -8,8 +8,9 @@ import { processDelivery } from "./ingest";
 import { deliverMetaConversion, RetryableDeliveryError } from "./meta-delivery";
 import { insertDelivery, loadDelivery, resetDelivery } from "./operational";
 import { assertAllowedProviderUrl, extractWebhookToken, sanitizePayload } from "./security";
-import { findConnection, isPlatformAdmin, patchRows, requireWorkspaceMember, supabaseAuthJson, supabaseJson, workspaceRole, writeAudit } from "./supabase";
-import { installUazapiWebhook, testUazapiConnection, type UazapiCredentials } from "./uazapi";
+import { findAgendorIntegration, findConnection, hasWorkspaceReadAccess, isPlatformAdmin, patchRows, requireWorkspaceMember, supabaseAuthJson, supabaseJson, workspaceRole, writeAudit } from "./supabase";
+import { diagnoseUazapiError, testUazapiConnection, verifyUazapiWebhook, type UazapiCredentials } from "./uazapi";
+import { AgendorApiError, AgendorClient, createAgendorBaseUrl } from "./agendor";
 import { auditDetail, canManageRole, isUuid, isWorkspaceRole } from "./admin-policy";
 
 type AppBindings = { Bindings: Env; Variables: AuthVariables };
@@ -325,15 +326,102 @@ app.get("/api/admin/workspaces/:id/audit", async (context) => {
   })), nextCursor: null });
 });
 
-app.get("/api/connections", async (context) => {
+app.get("/api/agendor-integrations", async (context) => {
   const workspaceId = context.req.query("workspaceId");
   if (!workspaceId) return context.json({ error: "workspace_id_required" }, 400);
   await requireWorkspaceMember(context.env, workspaceId, context.get("userId"));
-  const rows = await supabaseJson(context.env,
-    `/rest/v1/provider_connections?workspace_id=eq.${encodeURIComponent(workspaceId)}` +
-    "&select=id,label,base_url,instance_id,status,meta_mode,webhook_installed_at,last_tested_at,created_at&order=created_at.desc"
+  const rows = await supabaseJson<Array<{
+    id: string; label: string; base_url: string; mode: string; status: string;
+    last_tested_at: string | null; last_error_code: string | null;
+  }>>(context.env,
+    `/rest/v1/agendor_integrations?workspace_id=eq.${encodeURIComponent(workspaceId)}` +
+      "&select=id,label,base_url,mode,status,last_tested_at,last_error_code&order=created_at.desc"
   );
   return context.json({ data: rows });
+});
+
+app.post("/api/agendor-integrations", async (context) => {
+  const parsed = createAgendorIntegrationSchema.safeParse(await context.req.json().catch(() => null));
+  if (!parsed.success) return context.json({ error: "invalid_agendor_integration", fields: parsed.error.flatten().fieldErrors }, 400);
+  await requireWorkspaceMember(context.env, parsed.data.workspaceId, context.get("userId"), ["owner", "admin"]);
+  let baseUrl: string;
+  try { baseUrl = createAgendorBaseUrl(parsed.data.baseUrl); }
+  catch (error) { return context.json({ error: errorCode(error) }, 400); }
+  const id = crypto.randomUUID();
+  const tokenCipher = await encryptText(parsed.data.token, context.env.CREDENTIAL_ENCRYPTION_KEY, `agendor:${id}:token`);
+  try {
+    const rows = await supabaseJson<Array<Record<string, unknown>>>(context.env, "/rest/v1/agendor_integrations", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        id, workspace_id: parsed.data.workspaceId, label: parsed.data.label,
+        base_url: baseUrl, token_cipher: tokenCipher, mode: "observation",
+        status: "credentials_saved", created_by: context.get("userId")
+      })
+    });
+    await writeAudit(context.env, {
+      workspaceId: parsed.data.workspaceId, actorUserId: context.get("userId"),
+      action: "agendor.integration.created", targetType: "agendor_integration", targetId: id
+    });
+    return context.json({ data: { id, label: parsed.data.label, base_url: baseUrl, mode: "observation", status: "credentials_saved" } }, 201);
+  } catch (error) {
+    if (isUniqueConflict(error)) return context.json({ error: "agendor_integration_conflict" }, 409);
+    throw error;
+  }
+});
+
+app.post("/api/agendor-integrations/:id/test", async (context) => {
+  const integration = await authorizedAgendorIntegration(context, ["owner", "admin", "operator"]);
+  if (integration instanceof Response) return integration;
+  const token = await agendorToken(context.env, integration.id, integration.token_cipher);
+  try {
+    const result = await new AgendorClient({ baseUrl: integration.base_url, token }).get("/users/me");
+    await patchRows(context.env, "agendor_integrations", `id=eq.${encodeURIComponent(integration.id)}`, {
+      status: "connected", last_tested_at: new Date().toISOString(), last_error_code: null
+    });
+    await writeAudit(context.env, {
+      workspaceId: integration.workspace_id, actorUserId: context.get("userId"),
+      action: "agendor.integration.tested", targetType: "agendor_integration", targetId: integration.id
+    });
+    return context.json({ data: { connected: true, status: 200, account: result.data } });
+  } catch (error) {
+    const code = error instanceof AgendorApiError ? `agendor_http_${error.status}` : errorCode(error);
+    await patchRows(context.env, "agendor_integrations", `id=eq.${encodeURIComponent(integration.id)}`, {
+      status: "needs_attention", last_error_code: code
+    });
+    return context.json({ error: "agendor_connection_failed", status: error instanceof AgendorApiError ? error.status : 502 }, 422);
+  }
+});
+
+app.get("/api/agendor-integrations/:id/catalog", async (context) => {
+  const integration = await authorizedAgendorIntegration(context, ["owner", "admin", "operator", "viewer"]);
+  if (integration instanceof Response) return integration;
+  const token = await agendorToken(context.env, integration.id, integration.token_cipher);
+  try {
+    const catalog = await new AgendorClient({ baseUrl: integration.base_url, token }).catalog();
+    return context.json({ data: catalog });
+  } catch (error) {
+    const code = error instanceof AgendorApiError ? `agendor_http_${error.status}` : errorCode(error);
+    await patchRows(context.env, "agendor_integrations", `id=eq.${encodeURIComponent(integration.id)}`, { last_error_code: code });
+    return context.json({ error: "agendor_catalog_failed" }, 502);
+  }
+});
+
+app.get("/api/connections", async (context) => {
+  const workspaceId = context.req.query("workspaceId");
+  if (!workspaceId) return context.json({ error: "workspace_id_required" }, 400);
+  if (!await hasWorkspaceReadAccess(context.env, workspaceId, context.get("userId"))) return context.json({ error: "workspace_access_denied" }, 403);
+  const rows = await supabaseJson<Array<Record<string, unknown> & { id: string }>>(context.env,
+    `/rest/v1/provider_connections?workspace_id=eq.${encodeURIComponent(workspaceId)}` +
+    "&select=id,label,base_url,status,meta_mode,webhook_installed_at,last_tested_at,last_error_code,last_error_summary,suspended_at&order=created_at.desc"
+  );
+  const callbackBase = context.env.PUBLIC_API_BASE_URL.replace(/\/$/, "");
+  return context.json({
+    data: rows.map((row) => ({
+      ...row,
+      webhook_url: `${callbackBase}/webhooks/uazapi/${encodeURIComponent(row.id)}`
+    }))
+  });
 });
 
 app.post("/api/connections", async (context) => {
@@ -353,22 +441,28 @@ app.post("/api/connections", async (context) => {
     context.env.CREDENTIAL_ENCRYPTION_KEY,
     `connection:${id}:credentials`
   );
-  const rows = await supabaseJson<Array<Record<string, unknown>>>(context.env, "/rest/v1/provider_connections", {
-    method: "POST",
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify({
-      id,
-      workspace_id: parsed.data.workspaceId,
-      label: parsed.data.label,
-      provider: "uazapi",
-      base_url: baseUrl,
-      instance_id: parsed.data.instanceId ?? null,
-      credentials_cipher: credentialsCipher,
-      status: "credentials_saved",
-      meta_mode: "observation",
-      created_by: context.get("userId")
-    })
-  });
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = await supabaseJson<Array<Record<string, unknown>>>(context.env, "/rest/v1/provider_connections", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        id,
+        workspace_id: parsed.data.workspaceId,
+        label: parsed.data.label,
+        provider: "uazapi",
+        base_url: baseUrl,
+        instance_id: parsed.data.instanceId ?? null,
+        credentials_cipher: credentialsCipher,
+        status: "credentials_saved",
+        meta_mode: "observation",
+        created_by: context.get("userId")
+      })
+    });
+  } catch (error) {
+    if (isUniqueConflict(error)) return context.json({ error: "connection_label_conflict" }, 409);
+    throw error;
+  }
   const row = rows[0] ?? { id, label: parsed.data.label, status: "credentials_saved" };
   delete row.credentials_cipher;
   await writeAudit(context.env, {
@@ -381,53 +475,152 @@ app.post("/api/connections", async (context) => {
   return context.json({ data: row }, 201);
 });
 
+app.patch("/api/connections/:id", async (context) => {
+  const connection = await authorizedConnection(context, ["owner", "admin", "operator"]);
+  if (connection instanceof Response) return connection;
+  const parsed = updateConnectionSchema.safeParse(await context.req.json().catch(() => null));
+  if (!parsed.success) return context.json({ error: "invalid_connection", fields: parsed.error.flatten().fieldErrors }, 400);
+  let baseUrl: string;
+  try {
+    baseUrl = assertAllowedProviderUrl(parsed.data.baseUrl, context.env.UAZAPI_ALLOWED_HOSTS).toString().replace(/\/$/, "");
+  } catch (error) { return context.json({ error: errorCode(error) }, 400); }
+  const patch: Record<string, unknown> = { label: parsed.data.label, base_url: baseUrl };
+  if (parsed.data.token) {
+    patch.credentials_cipher = await encryptText(JSON.stringify({ token: parsed.data.token }), context.env.CREDENTIAL_ENCRYPTION_KEY, `connection:${connection.id}:credentials`);
+  }
+  if (parsed.data.baseUrl !== connection.base_url || parsed.data.token) {
+    patch.status = connection.status === "suspended" ? "suspended" : "credentials_saved";
+    patch.meta_mode = "observation";
+    patch.last_tested_at = null;
+    patch.last_error_code = null;
+    patch.last_error_summary = null;
+  }
+  try {
+    await patchRows(context.env, "provider_connections", `id=eq.${encodeURIComponent(connection.id)}`, patch);
+  } catch (error) {
+    if (isUniqueConflict(error)) return context.json({ error: "connection_label_conflict" }, 409);
+    throw error;
+  }
+  await writeAudit(context.env, {
+    workspaceId: connection.workspace_id, actorUserId: context.get("userId"),
+    action: "uazapi.connection.updated", targetType: "provider_connection", targetId: connection.id,
+    metadata: { baseUrlChanged: baseUrl !== connection.base_url, tokenRotated: Boolean(parsed.data.token) }
+  });
+  return context.json({ data: { id: connection.id, label: parsed.data.label, status: patch.status ?? connection.status } });
+});
+
+app.patch("/api/connections/:id/suspension", async (context) => {
+  const connection = await authorizedConnection(context, ["owner", "admin"]);
+  if (connection instanceof Response) return connection;
+  const parsed = connectionSuspensionSchema.safeParse(await context.req.json().catch(() => null));
+  if (!parsed.success) return context.json({ error: "invalid_suspension" }, 400);
+  if (parsed.data.suspended) {
+    if (connection.status === "suspended") return context.json({ data: { suspended: true } });
+    const now = new Date().toISOString();
+    await patchRows(context.env, "provider_connections", `id=eq.${encodeURIComponent(connection.id)}`, {
+      status: "suspended", suspended_at: now, meta_mode: "observation"
+    });
+    await writeAudit(context.env, { workspaceId: connection.workspace_id, actorUserId: context.get("userId"), action: "uazapi.connection.suspended", targetType: "provider_connection", targetId: connection.id });
+    return context.json({ data: { suspended: true } });
+  }
+  if (connection.status !== "suspended") return context.json({ error: "connection_not_suspended" }, 409);
+  if (!connection.suspended_at || !connection.last_tested_at || Date.parse(connection.last_tested_at) <= Date.parse(connection.suspended_at) || connection.last_error_code) {
+    return context.json({ error: "connection_test_required" }, 409);
+  }
+  const status = connection.webhook_installed_at ? "observing" : "needs_webhook";
+  await patchRows(context.env, "provider_connections", `id=eq.${encodeURIComponent(connection.id)}`, {
+    status, suspended_at: null, meta_mode: "observation"
+  });
+  await writeAudit(context.env, { workspaceId: connection.workspace_id, actorUserId: context.get("userId"), action: "uazapi.connection.resumed", targetType: "provider_connection", targetId: connection.id });
+  return context.json({ data: { suspended: false, status } });
+});
+
 app.post("/api/connections/:id/test", async (context) => {
   const connection = await authorizedConnection(context, ["owner", "admin", "operator"]);
   if (connection instanceof Response) return connection;
-  const credentials = await connectionCredentials(context.env, connection.id, connection.credentials_cipher);
-  const result = await testUazapiConnection(connection.base_url, context.env.UAZAPI_ALLOWED_HOSTS, credentials);
-  await patchRows(context.env, "provider_connections", `id=eq.${connection.id}`, {
-    status: result.connected ? "connected" : "needs_attention",
-    last_tested_at: new Date().toISOString(),
-    last_error_code: result.connected ? null : `uazapi_http_${result.status}`
-  });
-  await writeAudit(context.env, {
-    workspaceId: connection.workspace_id, actorUserId: context.get("userId"),
-    action: "uazapi.connection.tested", targetType: "provider_connection", targetId: connection.id,
-    metadata: { connected: result.connected, httpStatus: result.status }
-  });
-  return context.json({ data: { connected: result.connected, status: result.status } }, result.connected ? 200 : 422);
+  let credentials: UazapiCredentials | null = null;
+  try {
+    credentials = await connectionCredentials(context.env, connection.id, connection.credentials_cipher);
+    const result = await testUazapiConnection(connection.base_url, context.env.UAZAPI_ALLOWED_HOSTS, credentials);
+    if (result.connected) {
+      await patchRows(context.env, "provider_connections", `id=eq.${connection.id}`, {
+        status: connection.status === "suspended" ? "suspended" : "connected",
+        last_tested_at: new Date().toISOString(), last_error_code: null, last_error_summary: null
+      });
+      await writeAudit(context.env, { workspaceId: connection.workspace_id, actorUserId: context.get("userId"), action: "uazapi.connection.tested", targetType: "provider_connection", targetId: connection.id, metadata: { connected: true } });
+      return context.json({ data: { connected: true, status: 200 } });
+    }
+    const diagnostic = result.diagnostic!;
+    return await persistConnectionDiagnostic(context, connection, diagnostic, diagnostic.summary, 422);
+  } catch (error) {
+    const diagnostic = diagnoseUazapiError(error, credentials?.token);
+    return await persistConnectionDiagnostic(context, connection, diagnostic, diagnostic.detail, 502);
+  }
 });
 
 app.post("/api/connections/:id/webhook", async (context) => {
   const connection = await authorizedConnection(context, ["owner", "admin", "operator"]);
   if (connection instanceof Response) return connection;
-  const credentials = await connectionCredentials(context.env, connection.id, connection.credentials_cipher);
+  if (connection.status === "suspended") return context.json({ error: "connection_suspended" }, 409);
   const webhookUrl = `${context.env.PUBLIC_API_BASE_URL.replace(/\/$/, "")}/webhooks/uazapi/${connection.id}`;
   try {
-    await installUazapiWebhook(connection.base_url, context.env.UAZAPI_ALLOWED_HOSTS, credentials, webhookUrl);
+    const credentials = await connectionCredentials(context.env, connection.id, connection.credentials_cipher);
+    const verification = await verifyUazapiWebhook(
+      connection.base_url, context.env.UAZAPI_ALLOWED_HOSTS, credentials, webhookUrl
+    );
+    if (!verification.verified) {
+      const summaries: Record<typeof verification.reason, string> = {
+        verified: "A configuração do webhook foi confirmada.",
+        destination_not_found: "Não encontrei na UAZAPI um webhook com a URL deste workspace.",
+        duplicate_destinations: "Há mais de um webhook configurado para a URL deste workspace.",
+        disabled: "O webhook da UAZAPI está desativado.",
+        events_mismatch: "O webhook precisa escutar os eventos messages e connection.",
+        filters_mismatch: "Configure os filtros fromMeYes e isGroupYes para este receiver.",
+        dynamic_url: "Desative addUrlEvents e addUrlTypesMessages para manter a URL estática."
+      };
+      const summary = summaries[verification.reason];
+      await patchRows(context.env, "provider_connections", `id=eq.${encodeURIComponent(connection.id)}`, {
+        status: "needs_webhook",
+        webhook_installed_at: null,
+        last_error_code: `uazapi_webhook_${verification.reason}`,
+        last_error_summary: summary
+      });
+      await writeAudit(context.env, {
+        workspaceId: connection.workspace_id, actorUserId: context.get("userId"),
+        action: "uazapi.webhook.verify_failed", targetType: "provider_connection", targetId: connection.id,
+        metadata: {
+          reason: verification.reason,
+          destination: verification.checks.destination,
+          enabled: verification.checks.enabled,
+          events: verification.checks.events,
+          filters: verification.checks.filters,
+          staticUrl: verification.checks.staticUrl
+        }
+      });
+      return context.json({ error: "uazapi_webhook_mismatch", summary, verification }, 409);
+    }
     await patchRows(context.env, "provider_connections", `id=eq.${connection.id}`, {
       status: "observing", webhook_installed_at: new Date().toISOString(), last_error_code: null
     });
     await writeAudit(context.env, {
       workspaceId: connection.workspace_id, actorUserId: context.get("userId"),
-      action: "uazapi.webhook.installed", targetType: "provider_connection", targetId: connection.id
+      action: "uazapi.webhook.verified", targetType: "provider_connection", targetId: connection.id,
+      metadata: verification.checks
     });
-    return context.json({ data: { installed: true, webhookUrl } });
+    return context.json({ data: { verified: true, checks: verification.checks } });
   } catch (error) {
-    await patchRows(context.env, "provider_connections", `id=eq.${connection.id}`, {
-      status: "needs_webhook", last_error_code: errorCode(error)
+    const diagnostic = diagnoseUazapiError(error);
+    const persisted = await persistConnectionDiagnostic(context, connection, diagnostic, diagnostic.detail, 422, {
+      action: "uazapi.webhook.verify_failed", status: "needs_webhook", tested: false, clearWebhook: true
     });
-    return context.json({
-      error: "automatic_webhook_failed",
-      fallback: { webhookUrl, events: ["messages", "connection"], exclude: ["fromMeYes", "isGroupYes"] }
-    }, 422);
+    return persisted;
   }
 });
 
 app.patch("/api/connections/:id/activation", async (context) => {
   const connection = await authorizedConnection(context, ["owner", "admin"]);
   if (connection instanceof Response) return connection;
+  if (connection.status === "suspended") return context.json({ error: "connection_suspended" }, 409);
   const parsed = activationSchema.safeParse(await context.req.json().catch(() => null));
   if (!parsed.success) return context.json({ error: "invalid_activation" }, 400);
   if (parsed.data.active && !connection.webhook_installed_at) {
@@ -488,10 +681,10 @@ app.post("/api/meta-destinations", async (context) => {
 app.get("/api/leads", async (context) => {
   const workspaceId = context.req.query("workspaceId");
   if (!workspaceId) return context.json({ error: "workspace_id_required" }, 400);
-  await requireWorkspaceMember(context.env, workspaceId, context.get("userId"));
+  if (!await hasWorkspaceReadAccess(context.env, workspaceId, context.get("userId"))) return context.json({ error: "workspace_access_denied" }, 403);
   const rows = await supabaseJson(context.env,
     `/rest/v1/leads?workspace_id=eq.${encodeURIComponent(workspaceId)}` +
-    "&select=id,status,first_seen_at,last_seen_at,last_classification,contacts(display_name_hint),attributions(source_id,headline),conversion_events(status,event_id)&order=last_seen_at.desc&limit=100"
+    "&select=id,status,first_seen_at,last_seen_at,last_classification,attributions(source_id,headline),conversion_events(status,event_id)&order=last_seen_at.desc&limit=100"
   );
   return context.json({ data: rows });
 });
@@ -499,10 +692,10 @@ app.get("/api/leads", async (context) => {
 app.get("/api/operations", async (context) => {
   const workspaceId = context.req.query("workspaceId");
   if (!workspaceId) return context.json({ error: "workspace_id_required" }, 400);
-  await requireWorkspaceMember(context.env, workspaceId, context.get("userId"));
+  if (!await hasWorkspaceReadAccess(context.env, workspaceId, context.get("userId"))) return context.json({ error: "workspace_access_denied" }, 403);
   const rows = await supabaseJson(context.env,
     `/rest/v1/conversion_events?workspace_id=eq.${encodeURIComponent(workspaceId)}` +
-    "&select=id,event_id,status,occurred_at,sent_at,last_error_code,leads(last_classification)&order=occurred_at.desc&limit=100"
+    "&select=id,event_id,status,occurred_at,sent_at,last_error_code&order=occurred_at.desc&limit=100"
   );
   return context.json({ data: rows });
 });
@@ -584,6 +777,9 @@ app.post("/webhooks/uazapi/:connectionId", async (context) => {
 });
 
 app.onError((error, context) => {
+  if (error instanceof Error && error.message === "workspace_access_denied") {
+    return context.json({ error: "workspace_access_denied" }, 403);
+  }
   console.error(JSON.stringify({ code: errorCode(error), path: context.req.path }));
   return context.json({ error: "internal_error", code: errorCode(error) }, 500);
 });
@@ -640,6 +836,57 @@ async function authorizedConnection(context: Parameters<typeof requireAuth>[0], 
   if (!connection) return context.json({ error: "connection_not_found" }, 404);
   await requireWorkspaceMember(context.env, connection.workspace_id, context.get("userId"), roles);
   return connection;
+}
+
+async function persistConnectionDiagnostic(
+  context: Parameters<typeof requireAuth>[0],
+  connection: NonNullable<Awaited<ReturnType<typeof findConnection>>>,
+  diagnostic: Omit<ReturnType<typeof diagnoseUazapiError>, "detail">,
+  detail: string,
+  responseStatus: 422 | 502,
+  options: { action?: string; status?: string; tested?: boolean; clearWebhook?: boolean } = {}
+): Promise<Response> {
+  const safeDetail = detail.slice(0, 2000);
+  let persisted = false;
+  try {
+    await patchRows(context.env, "provider_connections", `id=eq.${encodeURIComponent(connection.id)}`, {
+      status: connection.status === "suspended" ? "suspended" : options.status ?? "needs_attention",
+      last_error_code: diagnostic.code,
+      last_error_summary: diagnostic.summary,
+      ...(options.clearWebhook ? { webhook_installed_at: null } : {})
+    });
+    if (options.tested !== false) {
+      await patchRows(context.env, "provider_connections", `id=eq.${encodeURIComponent(connection.id)}`, { last_tested_at: new Date().toISOString() });
+    }
+    await writeAudit(context.env, {
+      workspaceId: connection.workspace_id, actorUserId: context.get("userId"),
+      action: options.action ?? "uazapi.connection.test_failed", targetType: "provider_connection", targetId: connection.id,
+      metadata: { diagnosticCode: diagnostic.code, category: diagnostic.category, httpStatus: diagnostic.httpStatus, summary: diagnostic.summary, detail: safeDetail }
+    });
+    persisted = true;
+  } catch {
+    console.error(JSON.stringify({ event: "uazapi_connection_diagnostic_persistence_failed", connectionId: connection.id, code: diagnostic.code, summary: diagnostic.summary, detail: safeDetail }));
+  }
+  return context.json({ error: "uazapi_connection_failed", diagnostic: { code: diagnostic.code, category: diagnostic.category, httpStatus: diagnostic.httpStatus, summary: diagnostic.summary }, auditPersisted: persisted }, responseStatus);
+}
+
+async function authorizedAgendorIntegration(context: Parameters<typeof requireAuth>[0], roles: string[]) {
+  const integrationId = context.req.param("id");
+  if (!integrationId) return context.json({ error: "agendor_integration_id_required" }, 400);
+  const integration = await findAgendorIntegration(context.env, integrationId);
+  if (!integration) return context.json({ error: "agendor_integration_not_found" }, 404);
+  try {
+    await requireWorkspaceMember(context.env, integration.workspace_id, context.get("userId"), roles);
+  } catch {
+    return context.json({ error: "workspace_access_denied" }, 403);
+  }
+  return integration;
+}
+
+async function agendorToken(env: Env, id: string, cipher: string): Promise<string> {
+  const token = await decryptText(cipher, env.CREDENTIAL_ENCRYPTION_KEY, `agendor:${id}:token`);
+  if (!token) throw new Error("agendor_credentials_invalid");
+  return token;
 }
 
 async function connectionCredentials(env: Env, id: string, cipher: string): Promise<UazapiCredentials> {

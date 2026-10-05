@@ -6,7 +6,7 @@ const envPath = resolve(process.env.GLOWDC_ENV_PATH ?? "../.env");
 const values = parseEnv(readFileSync(envPath, "utf8"));
 const supabaseUrl = values.get("SUPABASE_URL");
 const secretKey = values.get("SUPABASE_SECRET_KEY");
-const adminEmail = values.get("SUPABASE_ADMIN_EMAIL")?.trim().toLowerCase();
+const adminEmail = values.get("GLOWDC_SUPABASE_ADMIN_EMAIL")?.trim().toLowerCase();
 
 if (!supabaseUrl || !secretKey || !adminEmail) {
   console.error("Bootstrap recusado: configuração do projeto ou conta administrativa ausente.");

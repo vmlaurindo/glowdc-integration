@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "./env";
-import { supabaseJson } from "./supabase";
+import { hasWorkspaceReadAccess, supabaseJson } from "./supabase";
 
 describe("Supabase API key transport", () => {
   afterEach(() => {
@@ -26,5 +26,45 @@ describe("Supabase API key transport", () => {
 
     expect(result).toEqual([{ id: "fixture" }]);
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe("workspace dashboard read access", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("allows a platform admin without a workspace membership", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      const rows = url.pathname.endsWith("/workspace_members") ? [] : [{ user_id: "admin-fixture" }];
+      return new Response(JSON.stringify(rows), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(hasWorkspaceReadAccess({ SUPABASE_URL: "https://fixture.supabase.co", SUPABASE_SECRET_KEY: "sb_secret_fixture" } as Env, "workspace-fixture", "admin-fixture"))
+      .resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("denies an unrelated user without a membership", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      return new Response(JSON.stringify([]), { status: 200 });
+    }));
+
+    await expect(hasWorkspaceReadAccess({ SUPABASE_URL: "https://fixture.supabase.co", SUPABASE_SECRET_KEY: "sb_secret_fixture" } as Env, "workspace-fixture", "user-fixture"))
+      .resolves.toBe(false);
+  });
+
+  it("allows an existing member without checking platform-admin status", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      const rows = url.pathname.endsWith("/workspace_members") ? [{ role: "viewer" }] : [];
+      return new Response(JSON.stringify(rows), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(hasWorkspaceReadAccess({ SUPABASE_URL: "https://fixture.supabase.co", SUPABASE_SECRET_KEY: "sb_secret_fixture" } as Env, "workspace-fixture", "member-fixture"))
+      .resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

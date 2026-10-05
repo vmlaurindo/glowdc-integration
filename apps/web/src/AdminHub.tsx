@@ -41,7 +41,15 @@ const actionLabels: Record<string, string> = {
   "member.role_updated": "Papel alterado",
   "member.revoked": "Acesso revogado",
   "uazapi.connection.tested": "Conexão testada",
-  "uazapi.webhook.installed": "Webhook instalado"
+  "uazapi.connection.test_failed": "Falha no teste UAZAPI",
+  "uazapi.connection.created": "Conexão UAZAPI criada",
+  "uazapi.connection.updated": "Conexão UAZAPI alterada",
+  "uazapi.connection.suspended": "Conexão UAZAPI suspensa",
+  "uazapi.connection.resumed": "Conexão UAZAPI retomada",
+  "uazapi.webhook.install_failed": "Falha ao instalar webhook UAZAPI",
+  "uazapi.webhook.installed": "Webhook instalado",
+  "uazapi.webhook.verified": "Webhook UAZAPI verificado",
+  "uazapi.webhook.verify_failed": "Falha ao verificar webhook UAZAPI"
 };
 
 export function AdminHub({ workspaceId, onWorkspacesChanged }: { workspaceId: string; onWorkspacesChanged: () => Promise<void> }) {

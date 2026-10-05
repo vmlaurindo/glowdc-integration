@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const args = new Set(process.argv.slice(2));
-const mode = ["--inspect", "--apply", "--apply-admin", "--configure-auth", "--keys", "--write-env"].find((entry) => args.has(entry));
+const mode = ["--inspect", "--inspect-lead-ingestion", "--inspect-uazapi-cleanup", "--delete-uazapi-cleanup", "--apply", "--apply-admin", "--apply-agendor", "--apply-uazapi", "--configure-auth", "--keys", "--write-env"].find((entry) => args.has(entry));
 const operationalEnv = parseEnv(readFileSync(resolve(process.env.GLOWDC_ENV_PATH ?? "../.env"), "utf8"));
 const projectUrl = process.env.SUPABASE_URL ?? operationalEnv.get("SUPABASE_URL");
 const projectRef = process.env.SUPABASE_PROJECT_REF ?? deriveProjectRef(projectUrl);
@@ -13,7 +13,7 @@ const expectedName = process.env.SUPABASE_EXPECTED_PROJECT_NAME ?? operationalEn
 const apiBase = "https://api.supabase.com/v1";
 
 if (!mode || !projectRef || !accessToken) {
-  console.error("Uso: SUPABASE_ACCESS_TOKEN + --inspect|--apply|--apply-admin|--configure-auth|--keys|--write-env");
+  console.error("Uso: SUPABASE_ACCESS_TOKEN + --inspect|--inspect-lead-ingestion|--inspect-uazapi-cleanup|--delete-uazapi-cleanup|--apply|--apply-admin|--apply-agendor|--apply-uazapi|--configure-auth|--keys|--write-env");
   process.exit(2);
 }
 
@@ -43,6 +43,69 @@ if (mode === "--inspect") {
     publicTables: rows,
     unsafeFunctionGrants: Number(unsafeGrants[0]?.count ?? -1)
   }));
+}
+
+if (mode === "--inspect-lead-ingestion") {
+  const counts = await query(`
+    select json_build_object(
+      'webhook_events', (select count(*)::int from public.webhook_events),
+      'leads', (select count(*)::int from public.leads),
+      'attributions', (select count(*)::int from public.attributions),
+      'conversion_events', (select count(*)::int from public.conversion_events)
+    ) as counts;
+  `);
+  console.log(JSON.stringify({ project: { id: project.id, name: project.name }, ingestion: counts[0]?.counts ?? null }));
+}
+
+if (mode === "--inspect-uazapi-cleanup") {
+  const connections = await query(`
+    select c.id, c.label, c.status,
+      (select count(*)::int from public.webhook_events e where e.connection_id = c.id) as webhook_events,
+      (select count(*)::int from public.attributions a where a.connection_id = c.id) as attributions,
+      (select count(*)::int from public.conversion_events v join public.attributions a on a.id = v.attribution_id where a.connection_id = c.id) as conversions
+    from public.provider_connections c
+    join public.workspaces w on w.id = c.workspace_id
+    where w.slug = 'glowdc' and c.provider = 'uazapi'
+      and c.label in ('Glow Lab Dental', 'Laboratório Glow')
+    order by c.label;
+  `);
+  console.log(JSON.stringify({ project: { id: project.id, name: project.name }, connections }));
+}
+
+if (mode === "--delete-uazapi-cleanup") {
+  const result = await query(`
+    with targets as (
+      select c.id
+      from public.provider_connections c
+      join public.workspaces w on w.id = c.workspace_id
+      where w.slug = 'glowdc' and c.provider = 'uazapi'
+        and ((c.id = '70455af1-4f13-4052-a3af-edc7e73583bf'::uuid and c.label = 'Glow Lab Dental')
+          or (c.id = 'df89e448-c04f-4df0-a9c2-b9f3738a3e88'::uuid and c.label = 'Laboratório Glow'))
+        and not exists (select 1 from public.webhook_events e where e.connection_id = c.id)
+        and not exists (select 1 from public.attributions a where a.connection_id = c.id)
+    ), ready as (
+      select array_agg(id) as ids from targets having count(*) = 2
+    ), removed as (
+      delete from public.provider_connections c using ready r
+      where c.id = any(r.ids) returning c.id
+    )
+    select count(*)::int as removed from removed;
+  `);
+  const removed = Number(result[0]?.removed ?? 0);
+  if (removed !== 2) {
+    console.error("Remoção recusada: os dois registros exatos não estavam presentes ou algum possui dados dependentes.");
+    process.exit(2);
+  }
+  const remaining = await query(`
+    select count(*)::int as count
+    from public.provider_connections
+    where id = any(array['70455af1-4f13-4052-a3af-edc7e73583bf', 'df89e448-c04f-4df0-a9c2-b9f3738a3e88']::uuid[]);
+  `);
+  if (Number(remaining[0]?.count ?? -1) !== 0) {
+    console.error("Remoção executada, mas a verificação dos registros restantes falhou.");
+    process.exit(1);
+  }
+  console.log(JSON.stringify({ removed, verifiedRemaining: 0, project: { id: project.id, name: project.name } }));
 }
 
 if (mode === "--apply") {
@@ -128,6 +191,73 @@ if (mode === "--apply-admin") {
     migration: "202609300001_admin_control_plane.sql",
     sha256: createHash("sha256").update(sql).digest("hex"),
     verification: result
+  }));
+}
+
+if (mode === "--apply-agendor") {
+  const migrationPaths = [
+    resolve("supabase/migrations/202610010001_agendor_integrations.sql"),
+    resolve("supabase/migrations/202610010002_agendor_pipeline.sql")
+  ];
+  const sql = migrationPaths.map((path) => readFileSync(path, "utf8")).join("\n");
+  const requiredTables = [
+    "agendor_integrations", "agendor_contact_links", "agendor_deals",
+    "agendor_movements", "agendor_sync_cursors", "integration_jobs",
+    "commercial_conversion_rules"
+  ];
+  if (!requiredTables.every((table) => sql.includes(`public.${table}`)) || /\b(?:DROP\s+TABLE|TRUNCATE|DELETE\s+FROM)\b/i.test(sql)) {
+    console.error("Aplicação recusada: as migrações Agendor não passaram pela política aditiva.");
+    process.exit(2);
+  }
+  await query(sql);
+  const verification = await query(`
+    select count(*)::int as tables
+    from information_schema.tables
+    where table_schema = 'public'
+      and table_name = any(array[${requiredTables.map((name) => `'${name}'`).join(",")}]);
+  `);
+  const tableCount = Number(verification[0]?.tables ?? 0);
+  if (tableCount !== requiredTables.length) {
+    console.error("Migrações Agendor aplicadas, mas a verificação estrutural falhou.");
+    process.exit(1);
+  }
+  console.log(JSON.stringify({
+    applied: true,
+    project: { id: project.id, name: project.name },
+    migrations: migrationPaths.map((path) => path.split(/[\\/]/).pop()),
+    verification: { tables: tableCount }
+  }));
+}
+
+if (mode === "--apply-uazapi") {
+  const migrationPath = resolve("supabase/migrations/202610020001_uazapi_connection_diagnostics.sql");
+  const sql = readFileSync(migrationPath, "utf8");
+  const requiredChanges = [
+    /ADD COLUMN IF NOT EXISTS last_error_summary text/i,
+    /ADD COLUMN IF NOT EXISTS suspended_at timestamptz/i
+  ];
+  if (!requiredChanges.every((pattern) => pattern.test(sql)) || /\b(?:DROP\s+TABLE|TRUNCATE|DELETE\s+FROM)\b/i.test(sql)) {
+    console.error("AplicaÃ§Ã£o recusada: a migraÃ§Ã£o UAZAPI nÃ£o passou pela polÃ­tica aditiva.");
+    process.exit(2);
+  }
+  await query(sql);
+  const verification = await query(`
+    select count(*)::int as columns
+    from information_schema.columns
+    where table_schema = 'public' and table_name = 'provider_connections'
+      and column_name = any(array['last_error_summary', 'suspended_at']);
+  `);
+  const columnCount = Number(verification[0]?.columns ?? 0);
+  if (columnCount !== requiredChanges.length) {
+    console.error("MigraÃ§Ã£o UAZAPI aplicada, mas a verificaÃ§Ã£o estrutural falhou.");
+    process.exit(1);
+  }
+  console.log(JSON.stringify({
+    applied: true,
+    project: { id: project.id, name: project.name },
+    migration: "202610020001_uazapi_connection_diagnostics.sql",
+    sha256: createHash("sha256").update(sql).digest("hex"),
+    verification: { columns: columnCount }
   }));
 }
 

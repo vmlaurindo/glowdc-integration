@@ -41,9 +41,16 @@ test("navigates the authenticated operational shell with synthetic data", async 
   await page.getByRole("button", { name: "Entrar no Maxio Hub" }).click();
 
   await expect(page).toHaveURL(/\/glowdc\/dashboard$/);
+  await expect(page.getByRole("heading", { name: /Qual workspace vamos abrir/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /GlowDC/ }).first()).toBeVisible();
+  await page.getByRole("button", { name: /GlowDC/ }).first().click();
   await expect(page.getByRole("heading", { name: "Pulso da operação" })).toBeVisible();
   await expect(page.getByText("GlowDC", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("article").filter({ hasText: "Conexões ativas" }).getByText("01", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Workspaces" }).click();
+  await expect(page.getByRole("heading", { name: /Qual workspace vamos abrir/ })).toBeVisible();
+  await page.getByRole("button", { name: /GlowDC/ }).first().click();
 
   await page.getByRole("button", { name: "Leads" }).click();
   await expect(page.getByRole("heading", { name: "Leads reconhecidos" })).toBeVisible();
@@ -56,6 +63,11 @@ test("navigates the authenticated operational shell with synthetic data", async 
   await page.getByRole("button", { name: "Conectar" }).click();
   await expect(page.getByRole("heading", { name: "Conectar uma origem" })).toBeVisible();
   await expect(page.getByText("Instância UAZAPI")).toBeVisible();
+  const webhookUrl = "https://app.maxio.com.br/glowdc/webhooks/uazapi/connection-demo";
+  await expect(page.getByText(webhookUrl)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Instalar webhook" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Verificar webhook salvo" }).click();
+  await expect(page.getByRole("status").getByText("Configuração conferida na UAZAPI. Nenhuma alteração foi enviada ao provedor.")).toBeVisible();
 });
 
 async function mockSupabaseAuth(page: Page) {
@@ -94,8 +106,14 @@ async function mockDashboardApi(page: Page) {
     if (path.endsWith("/api/workspaces")) {
       return route.fulfill({ json: { data: [{ role: "admin", workspaces: { id: "workspace-demo", name: "GlowDC", slug: "glowdc" } }] } });
     }
+    if (path.endsWith("/api/admin/context")) {
+      return route.fulfill({ json: { data: { platformAdmin: false, canAccessAdmin: false, workspaceIds: [] } } });
+    }
     if (path.endsWith("/api/connections")) {
-      return route.fulfill({ json: { data: [{ id: "connection-demo", label: "WhatsApp comercial", base_url: "https://synthetic.uazapi.com", status: "active", meta_mode: "observation", webhook_installed_at: now, last_tested_at: now }] } });
+      return route.fulfill({ json: { data: [{ id: "connection-demo", label: "WhatsApp comercial", base_url: "https://synthetic.uazapi.com", webhook_url: "https://app.maxio.com.br/glowdc/webhooks/uazapi/connection-demo", status: "active", meta_mode: "observation", webhook_installed_at: now, last_tested_at: now }] } });
+    }
+    if (path.endsWith("/api/connections/connection-demo/webhook")) {
+      return route.fulfill({ json: { data: { verified: true, checks: { destination: true, enabled: true, events: true, filters: true, staticUrl: true } } } });
     }
     if (path.endsWith("/api/leads")) {
       return route.fulfill({ json: { data: [{ id: "lead-demo", status: "active", first_seen_at: now, last_seen_at: now, last_classification: "paid_complete", attributions: [{ source_id: "source-demo", headline: "Campanha sintética" }], conversion_events: [{ status: "observed", event_id: "event-demo" }] }] } });
@@ -106,3 +124,67 @@ async function mockDashboardApi(page: Page) {
     return route.fulfill({ status: 404, json: { error: "synthetic_route_not_found" } });
   });
 }
+
+test("selects a platform workspace read-only without misaligning mobile navigation", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockSupabaseAuth(page);
+  await page.route("https://app.maxio.com.br/glowdc/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/api/workspaces")) return route.fulfill({ json: { data: [] } });
+    if (path.endsWith("/api/admin/context")) return route.fulfill({ json: { data: { platformAdmin: true, canAccessAdmin: true } } });
+    if (path.endsWith("/api/admin/workspaces")) return route.fulfill({ json: { data: [{ id: "workspace-global", name: "Clínica Sintética", slug: "clinica-sintetica" }] } });
+    if (path.endsWith("/api/connections")) return route.fulfill({ json: { data: [] } });
+    if (path.endsWith("/api/leads")) return route.fulfill({ json: { data: [] } });
+    if (path.endsWith("/api/operations")) return route.fulfill({ json: { data: [] } });
+    return route.fulfill({ status: 404, json: { error: "synthetic_route_not_found" } });
+  });
+
+  await page.goto("/glowdc/login");
+  await page.getByLabel("E-mail").fill("qa@example.invalid");
+  await page.getByLabel("Senha", { exact: true }).fill("synthetic-password");
+  await page.getByRole("button", { name: "Entrar no Maxio Hub" }).click();
+  await expect(page.getByRole("heading", { name: /Qual workspace vamos abrir/ })).toBeVisible();
+  const workspaceCard = page.getByRole("button", { name: /Clínica Sintética/ });
+  await expect(workspaceCard.getByText("Somente leitura")).toBeVisible();
+  await workspaceCard.click();
+
+  await expect(page.getByRole("heading", { name: /Pulso/ })).toBeVisible();
+  await expect(page.getByText(/Consulta administrativa/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Conectar" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Workspaces" })).toBeVisible();
+  const navButtons = page.locator("nav[aria-label]").locator("button:visible");
+  await expect(navButtons).toHaveCount(5);
+  const boxes = await navButtons.evaluateAll((buttons) => buttons.map((button) => {
+    const rect = button.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+  }));
+  expect(boxes.every((box) => box.left >= 0 && box.right <= 390 && box.bottom > box.top)).toBe(true);
+  expect(new Set(boxes.map((box) => `${Math.round(box.left)}:${Math.round(box.top)}`)).size).toBe(5);
+  await page.setViewportSize({ width: 320, height: 760 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("recovers from a workspace directory error and shows the admin empty state", async ({ page }) => {
+  let failFirstList = true;
+  await mockSupabaseAuth(page);
+  await page.route("https://app.maxio.com.br/glowdc/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/api/workspaces")) return route.fulfill({ json: { data: [] } });
+    if (path.endsWith("/api/admin/context")) return route.fulfill({ json: { data: { platformAdmin: true, canAccessAdmin: true } } });
+    if (path.endsWith("/api/admin/workspaces") && failFirstList) {
+      failFirstList = false;
+      return route.fulfill({ status: 503, json: { error: "temporary_directory_failure" } });
+    }
+    if (path.endsWith("/api/admin/workspaces")) return route.fulfill({ json: { data: [], canCreate: true } });
+    return route.fulfill({ status: 404, json: { error: "synthetic_route_not_found" } });
+  });
+
+  await page.goto("/glowdc/login");
+  await page.getByLabel("E-mail").fill("qa@example.invalid");
+  await page.getByLabel("Senha", { exact: true }).fill("synthetic-password");
+  await page.getByRole("button", { name: "Entrar no Maxio Hub" }).click();
+  await expect(page.getByRole("heading", { name: /carregar seus ambientes/ })).toBeVisible();
+  await page.getByRole("button", { name: "Tentar novamente" }).click();
+  await expect(page.getByText(/Nenhum workspace/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Abrir Administração/ })).toBeVisible();
+});

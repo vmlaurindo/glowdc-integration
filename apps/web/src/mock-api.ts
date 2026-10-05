@@ -27,11 +27,13 @@ type MockAudit = {
   targetLabel: string;
   detail: string;
 };
+type MockConnection = { id: string; label: string; base_url: string; status: string; meta_mode: "observation" | "active"; webhook_installed_at: string | null; last_tested_at: string | null; last_error_code: string | null; last_error_summary: string | null; suspended_at: string | null };
 
 type MockState = {
   workspaces: MockWorkspace[];
   members: Record<string, MockMember[]>;
   audits: Record<string, MockAudit[]>;
+  connections: MockConnection[];
   account: {
     userId: string;
     name: string;
@@ -70,6 +72,7 @@ function initialState(): MockState {
         { id: "audit-05", createdAt: "2026-09-29T13:20:00.000Z", actorEmail: LOCAL_MOCK_EMAIL, action: "workspace.created", targetType: "workspace", targetLabel: "GlowDC", detail: "Workspace criado com identificador glowdc" }
       ]
     },
+    connections: [{ id: "connection-demo", label: "WhatsApp comercial", base_url: "https://glowdc.exemplo.test", status: "active", meta_mode: "observation", webhook_installed_at: "2026-09-29T16:05:00.000Z", last_tested_at: "2026-09-30T13:42:00.000Z", last_error_code: null, last_error_summary: null, suspended_at: null }],
     account: { userId: MOCK_USER_ID, name: "Administração MAXIO", email: LOCAL_MOCK_EMAIL, photoUrl: null }
   };
 }
@@ -249,7 +252,52 @@ export function createMockApi() {
     }
 
     if (url.pathname === "/api/connections" && method === "GET") {
-      return { data: [{ id: "connection-demo", label: "WhatsApp comercial", base_url: "https://glowdc.exemplo.test", status: "active", meta_mode: "observation", webhook_installed_at: "2026-09-29T16:05:00.000Z", last_tested_at: "2026-09-30T13:42:00.000Z" }] } as T;
+      return { data: state.connections.map((connection) => ({
+        ...connection,
+        webhook_url: `https://app.maxio.com.br/glowdc/webhooks/uazapi/${encodeURIComponent(connection.id)}`
+      })) } as T;
+    }
+    if (url.pathname === "/api/connections" && method === "POST") {
+      const connection: MockConnection = { id: `connection-${crypto.randomUUID()}`, label: String(body.label ?? "Nova conexão"), base_url: String(body.baseUrl ?? "https://uazapi.exemplo.test"), status: "credentials_saved", meta_mode: "observation", webhook_installed_at: null, last_tested_at: null, last_error_code: null, last_error_summary: null, suspended_at: null };
+      state.connections.unshift(connection);
+      addAudit(GLOW_ID, { action: "uazapi.connection.created", targetType: "conexão", targetLabel: connection.label, detail: "Nova conexão UAZAPI cadastrada; credencial fictícia não persistida." });
+      return { data: { id: connection.id } } as T;
+    }
+    const connectionMatch = url.pathname.match(/^\/api\/connections\/([^/]+)(?:\/(test|webhook|suspension|activation))?$/);
+    if (connectionMatch) {
+      const connection = state.connections.find((item) => item.id === connectionMatch[1]);
+      if (!connection) mockError("connection_not_found", 404);
+      const operation = connectionMatch[2] ?? "update";
+      if (operation === "update" && method === "PATCH") {
+        connection.label = String(body.label ?? connection.label); connection.base_url = String(body.baseUrl ?? connection.base_url);
+        connection.status = connection.suspended_at ? "suspended" : "credentials_saved"; connection.last_tested_at = null; connection.last_error_code = null; connection.last_error_summary = null;
+        addAudit(GLOW_ID, { action: "uazapi.connection.updated", targetType: "conexão", targetLabel: connection.label, detail: "Conexão atualizada; token vazio preserva credencial." });
+        return { data: { id: connection.id, label: connection.label, status: connection.status } } as T;
+      }
+      if (operation === "test" && method === "POST") {
+        connection.last_tested_at = now();
+        if (connection.suspended_at) { connection.status = "suspended"; connection.last_error_code = null; connection.last_error_summary = null; }
+        else { connection.status = "needs_attention"; connection.last_error_code = "uazapi_http_504"; connection.last_error_summary = "A UAZAPI excedeu o tempo de resposta (HTTP 504). Tente novamente."; }
+        addAudit(GLOW_ID, { action: connection.last_error_code ? "uazapi.connection.test_failed" : "uazapi.connection.tested", targetType: "conexão", targetLabel: connection.label, detail: connection.last_error_code ? "uazapi_http_504 · timeout · HTTP 504\nA UAZAPI excedeu o tempo de resposta (HTTP 504).\nDetalhe: Gateway Timeout (fixture sintética)." : "Conexão confirmada." });
+        if (connection.last_error_code) { const error = new Error("uazapi_connection_failed"); Object.assign(error, { payload: { error: "uazapi_connection_failed", diagnostic: { code: connection.last_error_code, category: "timeout", httpStatus: 504, summary: connection.last_error_summary } } }); throw error; }
+        return { data: { connected: true, status: 200 } } as T;
+      }
+      if (operation === "suspension" && method === "PATCH") {
+        if (body.suspended === true) { connection.suspended_at = now(); connection.status = "suspended"; connection.meta_mode = "observation"; }
+        else { if (!connection.suspended_at || !connection.last_tested_at || Date.parse(connection.last_tested_at) <= Date.parse(connection.suspended_at) || connection.last_error_code) mockError("connection_test_required", 409); connection.suspended_at = null; connection.status = connection.webhook_installed_at ? "observing" : "needs_webhook"; connection.meta_mode = "observation"; }
+        addAudit(GLOW_ID, { action: connection.suspended_at ? "uazapi.connection.suspended" : "uazapi.connection.resumed", targetType: "conexão", targetLabel: connection.label, detail: connection.suspended_at ? "Conexão suspensa de forma reversível; histórico preservado." : "Conexão retomada em modo observação após teste bem-sucedido." });
+        return { data: { suspended: Boolean(connection.suspended_at) } } as T;
+      }
+      if ((operation === "webhook" || operation === "activation") && connection.status === "suspended") mockError("connection_suspended", 409);
+      if (operation === "webhook" && method === "POST") {
+        connection.webhook_installed_at = now();
+        connection.status = "observing";
+        connection.last_error_code = null;
+        connection.last_error_summary = null;
+        addAudit(GLOW_ID, { action: "uazapi.webhook.verified", targetType: "conexão", targetLabel: connection.label, detail: "Configuração do webhook UAZAPI consultada e confirmada; nenhuma alteração foi enviada ao provedor." });
+        return { data: { verified: true, checks: { destination: true, enabled: true, events: true, filters: true, staticUrl: true } } } as T;
+      }
+      if (operation === "activation" && method === "PATCH") { connection.meta_mode = body.active ? "active" : "observation"; return { data: { active: connection.meta_mode === "active" } } as T; }
     }
     if (url.pathname === "/api/leads" && method === "GET") {
       return { data: [
@@ -262,6 +310,20 @@ export function createMockApi() {
         { id: "operation-demo-01", event_id: "demo-event-01", status: "observed", occurred_at: "2026-09-30T14:10:00.000Z", sent_at: null, last_error_code: null },
         { id: "operation-demo-02", event_id: "demo-event-02", status: "sent", occurred_at: "2026-09-30T09:15:00.000Z", sent_at: "2026-09-30T09:15:04.000Z", last_error_code: null }
       ] } as T;
+    }
+
+    if (url.pathname === "/api/agendor-integrations" && method === "GET") {
+      return { data: [{ id: "agendor-demo", label: "Agendor GlowDC", base_url: "https://api.agendor.com.br/v3", mode: "observation", status: "connected", last_tested_at: "2026-10-01T12:00:00.000Z", last_error_code: null }] } as T;
+    }
+    if (url.pathname === "/api/agendor-integrations" && method === "POST") {
+      return { data: { id: "agendor-demo", label: String(body.label ?? "Agendor GlowDC"), base_url: "https://api.agendor.com.br/v3", mode: "observation", status: "credentials_saved", last_tested_at: null, last_error_code: null } } as T;
+    }
+    const agendorMatch = url.pathname.match(/^\/api\/agendor-integrations\/([^/]+)\/(test|catalog)$/);
+    if (agendorMatch && method === "POST" && agendorMatch[2] === "test") {
+      return { data: { connected: true, status: 200, account: { id: "account-demo", name: "Conta Agendor (demo)" } } } as T;
+    }
+    if (agendorMatch && method === "GET" && agendorMatch[2] === "catalog") {
+      return { data: { me: { id: "user-demo", name: "Operação demo" }, funnels: [{ id: "funnel-demo", name: "Funil de teste" }], dealStages: [{ id: "stage-demo", name: "Contato" }], dealStatuses: [{ id: 1, name: "Em andamento" }], leadOrigins: [], dealCustomFields: [], requestIds: ["req-demo"] } } as T;
     }
 
     mockError("mock_route_not_found", 404);

@@ -18,7 +18,8 @@ if (!existsSync(assetsIndex) || !existsSync(wrangler) || !existsSync(config)) {
 const result = spawnSync(process.execPath, [wrangler, "deploy", "--config", config], {
   cwd: resolve(root, "workers", "api"),
   env: {
-    ...process.env
+    ...process.env,
+    ...(apiToken ? { CLOUDFLARE_API_TOKEN: apiToken } : {})
   },
   stdio: "inherit"
 });

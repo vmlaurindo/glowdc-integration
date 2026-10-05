@@ -7,8 +7,8 @@ const values = parseEnv(readFileSync(envPath, "utf8"));
 const required = [
   "SUPABASE_URL",
   "SUPABASE_PUBLISHABLE_KEY",
-  "SUPABASE_ADMIN_EMAIL",
-  "SUPABASE_ADMIN_PASSWORD"
+  "GLOWDC_SUPABASE_ADMIN_EMAIL",
+  "GLOWDC_SUPABASE_ADMIN_PASSWORD"
 ];
 if (required.some((name) => !values.get(name))) fail("Smoke recusado: configuração ausente.");
 
@@ -18,8 +18,8 @@ const supabase = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 const { data, error } = await supabase.auth.signInWithPassword({
-  email: values.get("SUPABASE_ADMIN_EMAIL"),
-  password: values.get("SUPABASE_ADMIN_PASSWORD")
+  email: values.get("GLOWDC_SUPABASE_ADMIN_EMAIL"),
+  password: values.get("GLOWDC_SUPABASE_ADMIN_PASSWORD")
 });
 if (error || !data.session?.access_token) fail("Smoke falhou na autenticação.");
 

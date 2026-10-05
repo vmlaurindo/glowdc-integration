@@ -14,6 +14,18 @@ export const connectionStatuses = [
 export const connectionStatusSchema = z.enum(connectionStatuses);
 export type ConnectionStatus = z.infer<typeof connectionStatusSchema>;
 
+export const connectionDiagnosticCategories = [
+  "credentials", "permission", "not_found", "timeout", "rate_limit",
+  "provider", "redirect", "network", "configuration", "unknown"
+] as const;
+export const connectionDiagnosticSchema = z.object({
+  code: z.string().trim().min(1).max(100),
+  category: z.enum(connectionDiagnosticCategories),
+  httpStatus: z.number().int().min(100).max(599).nullable(),
+  summary: z.string().trim().min(1).max(240)
+});
+export type ConnectionDiagnostic = z.infer<typeof connectionDiagnosticSchema>;
+
 export const inboundClassifications = [
   "organic",
   "paid_complete",
@@ -35,6 +47,14 @@ export const createConnectionSchema = z.object({
   instanceId: z.string().trim().min(1).max(160).optional()
 });
 
+export const updateConnectionSchema = z.object({
+  label: z.string().trim().min(2).max(80),
+  baseUrl: z.string().url(),
+  token: z.string().min(8).max(4096).optional()
+});
+
+export const connectionSuspensionSchema = z.object({ suspended: z.boolean() });
+
 export const createWorkspaceSchema = z.object({
   name: z.string().trim().min(2).max(100),
   slug: z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9-]{1,62}$/)
@@ -46,6 +66,17 @@ export const metaDestinationSchema = z.object({
   pageId: z.string().trim().min(4).max(128),
   accessToken: z.string().min(16).max(8192),
   testEventCode: z.string().trim().max(128).optional()
+});
+
+export const createAgendorIntegrationSchema = z.object({
+  workspaceId: z.string().uuid(),
+  label: z.string().trim().min(2).max(80),
+  baseUrl: z.string().url().optional().default("https://api.agendor.com.br/v3"),
+  token: z.string().min(16).max(8192)
+});
+
+export const agendorModeSchema = z.object({
+  mode: z.enum(["observation", "active"])
 });
 
 export const activationSchema = z.object({

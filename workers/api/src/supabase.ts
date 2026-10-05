@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { canReadWorkspace } from "./admin-policy";
 
 export interface ConnectionRow {
   id: string;
@@ -10,7 +11,22 @@ export interface ConnectionRow {
   status: string;
   webhook_installed_at: string | null;
   last_tested_at: string | null;
+  last_error_code: string | null;
+  last_error_summary: string | null;
+  suspended_at: string | null;
   meta_mode: "observation" | "active";
+}
+
+export interface AgendorIntegrationRow {
+  id: string;
+  workspace_id: string;
+  label: string;
+  base_url: string;
+  token_cipher: string;
+  mode: "observation" | "active";
+  status: string;
+  last_tested_at: string | null;
+  last_error_code: string | null;
 }
 
 export interface ConversionContext {
@@ -93,6 +109,14 @@ export async function findConnection(env: Env, connectionId: string): Promise<Co
   return rows[0] ?? null;
 }
 
+export async function findAgendorIntegration(env: Env, integrationId: string): Promise<AgendorIntegrationRow | null> {
+  const rows = await supabaseJson<AgendorIntegrationRow[]>(
+    env,
+    `/rest/v1/agendor_integrations?id=eq.${encodeURIComponent(integrationId)}&select=*&limit=1`
+  );
+  return rows[0] ?? null;
+}
+
 export async function requireWorkspaceMember(
   env: Env,
   workspaceId: string,
@@ -105,6 +129,12 @@ export async function requireWorkspaceMember(
       `&user_id=eq.${encodeURIComponent(userId)}&select=role&limit=1`
   );
   if (!rows[0] || !allowedRoles.includes(rows[0].role)) throw new Error("workspace_access_denied");
+}
+
+export async function hasWorkspaceReadAccess(env: Env, workspaceId: string, userId: string): Promise<boolean> {
+  const role = await workspaceRole(env, workspaceId, userId);
+  const platformAdmin = role === null ? await isPlatformAdmin(env, userId) : false;
+  return canReadWorkspace(role, platformAdmin);
 }
 
 export async function patchRows(

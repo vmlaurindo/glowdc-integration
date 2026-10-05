@@ -7,7 +7,7 @@ const envPath = resolve(process.env.GLOWDC_ENV_PATH ?? "../.env");
 const source = readFileSync(envPath, "utf8");
 const values = parseEnv(source);
 const email = process.env.GLOWDC_ADMIN_EMAIL ?? "victor@maxio.com.br";
-const existingPassword = values.get("SUPABASE_ADMIN_PASSWORD");
+const existingPassword = values.get("GLOWDC_SUPABASE_ADMIN_PASSWORD");
 const password = /^[0-9a-f]{12}$/.test(existingPassword ?? "")
   ? existingPassword
   : randomBytes(6).toString("hex");
@@ -20,8 +20,8 @@ if (!supabaseUrl || !secretKey) {
 }
 
 writeManagedEnv(envPath, source, {
-  SUPABASE_ADMIN_EMAIL: email,
-  SUPABASE_ADMIN_PASSWORD: password
+  GLOWDC_SUPABASE_ADMIN_EMAIL: email,
+  GLOWDC_SUPABASE_ADMIN_PASSWORD: password
 });
 
 const supabase = createClient(supabaseUrl, secretKey, {
