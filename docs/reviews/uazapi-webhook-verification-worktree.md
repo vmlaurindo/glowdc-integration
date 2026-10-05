@@ -1,7 +1,7 @@
 # Revisão — verificação do webhook UAZAPI
 
 Data: 2026-10-05
-Escopo: revisão da mudança na árvore de trabalho, sem commit congelado.
+Escopo: revisão do commit congelado `3bd09c1` e confirmação de publicação.
 
 ## Itens revisados
 
@@ -14,4 +14,4 @@ Escopo: revisão da mudança na árvore de trabalho, sem commit congelado.
 
 ## Parecer
 
-Revisão local aprovada para validação funcional. A árvore já continha outras mudanças não relacionadas; esta revisão não atribui nem altera essas mudanças. O aceite de produção permanece pendente de revisão em commit/árvore congelada, deploy autorizado e conferência da instância real via Playwright/MCP e leitura autenticada, sem escrita no provedor.
+Revisão do commit aprovada para publicação. O commit inclui o conjunto completo de mudanças pendentes autorizado pelo usuário (workspace/admin, integrações Agendor, gestão/diagnóstico UAZAPI e leitura/verificação de webhook). As migrations Supabase foram aplicadas ao projeto esperado e verificadas; o Worker foi publicado e o caminho de usuário foi validado no live via Playwright MCP headless. A conferência da configuração UAZAPI foi somente leitura, sem alteração remota.

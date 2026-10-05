@@ -3,7 +3,7 @@
 Data: 2026-10-05
 Escopo: validação local da leitura e conferência do webhook já salvo na UAZAPI.
 
-## Evidências
+## Evidências locais
 
 - `npm.cmd run typecheck` — aprovado.
 - `npm.cmd test` — aprovado: 12 arquivos, 63 testes.
@@ -13,6 +13,15 @@ Escopo: validação local da leitura e conferência do webhook já salvo na UAZA
 - Playwright MCP headless em viewport móvel (390×844) — card dentro do viewport, sem overflow horizontal; console sem erros.
 - `git diff --check` — sem erros de whitespace.
 
-## Limites
+## Publicação e validação live
 
-Não houve leitura de credenciais, chamada real à UAZAPI, alteração de webhook remoto nem deploy. Portanto, estas evidências validam o comportamento local; não confirmam o estado atual da instância GlowDC em produção.
+- Commit publicado: `3bd09c1`.
+- Cloudflare Worker version: `f29332f6-0568-4ceb-926b-ae689a960b4d`.
+- Migrations Supabase aditivas aplicadas ao projeto Glow DC; verificação confirmou 7 tabelas Agendor e 2 colunas de diagnóstico UAZAPI.
+- Smoke live — health, autenticação, workspace `glowdc` como owner e endpoints administrativos aprovados.
+- Playwright MCP headless em `https://app.maxio.com.br/glowdc` — home autenticada, abertura do workspace, tela Conectar, endereço de callback e botão “Verificar webhook salvo” presentes; a verificação da instância retornou sucesso. Nenhuma configuração foi gravada na UAZAPI.
+- Console do navegador sem erros.
+
+## Limite de verificação automatizada
+
+Nesta execução, `npm.cmd run test:e2e` exibiu os sete cenários mas o processo não encerrou nem forneceu resultado final; foi interrompido. Não conto essa execução como aprovação E2E. O fluxo live acima foi percorrido e observado via Playwright MCP.
